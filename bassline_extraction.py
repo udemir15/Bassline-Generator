@@ -22,10 +22,10 @@ from madmom.features.beats import RNNBeatProcessor, BeatTrackingProcessor # Beat
 from pychorus import find_and_output_chorus # Chorus Finder
 from spleeter.separator import Separator # Source Separaion
 
+import traceback
 import warnings
 warnings.filterwarnings('ignore') # ignore librosa .mp3 warnings
 
-import traceback
 
 class Track:
     
@@ -317,7 +317,8 @@ if __name__ == '__main__':
 
     date = str(dt.date.today()) # for tracking experiments
 
-
+    exceptions = []
+    key_errors = []
     completed_tracks = []
     erroneous_tracks = []
     for title in tqdm(track_titles):
@@ -368,15 +369,24 @@ if __name__ == '__main__':
             import sys
             sys.exit()
             pass    
+        except KeyError:
+            print("Key error on: {}\n".format(title))
+            key_errors.append(title)            
         except Exception as ex:
             
             print("There was an error on: {}".format(title))
             exception_str = ''.join(traceback.format_exception(etype=type(ex), value=ex, tb=ex.__traceback__))
             print(exception_str+'\n')
             erroneous_tracks.append(title)
-
+            exceptions.append(exception_str)
     with open('data/bassline_extraction/completed_tracks_{}.txt'.format(date), 'w') as outfile:
-        outfile.write(' \n'.join(erroneous_tracks))
+        outfile.write(' \n'.join(completed_tracks))
         
     with open('data/bassline_extraction/error_log_{}.txt'.format(date), 'w') as outfile:
         outfile.write(' \n'.join(erroneous_tracks))
+        
+    with open('data/bassline_extraction/key_errors_{}.txt'.format(date), 'w') as outfile:
+        outfile.write(' \n'.join(key_errors))
+
+    with open('data/bassline_extraction/exceptions_{}.txt'.format(date), 'w') as outfile:
+        outfile.write(' \n'.join(exceptions)) 

@@ -26,6 +26,8 @@ import traceback
 import warnings
 warnings.filterwarnings('ignore') # ignore librosa .mp3 warnings
 
+from utilities import init_folders
+
 
 class Track:
     
@@ -120,10 +122,8 @@ class Track:
             
             self.info = info
             self.chorus = chorus # CHANGE LATER???           
-
             self.beat_proc = beat_proc
             self.tracking_proc = tracking_proc
-
             self.beat_positions = self.find_beat_positions()
             self.analyze_beats()
             self.aligned_chorus_beat_positions = np.array([]) # init as empty array
@@ -224,7 +224,7 @@ class Track:
         
         def __init__(self, info, audio, chorus, separator):
             
-            #self.separator = Separator('spleeter:4stems')
+            self.separator = separator
             self.info = info
             self.audio = audio
             self.chorus = chorus
@@ -270,47 +270,6 @@ class Track:
         else:
             print("The Beat Grid hasn't been aligned yet!.")
 
-
-def init_folders():
-
-    if not os.path.exists('data/bassline_extraction'):
-        os.mkdir('data/bassline_extraction')
-
-    if not os.path.exists('data/bassline_extraction/beat_grid'):
-        os.mkdir('data/bassline_extraction/beat_grid')
-
-    if not os.path.exists('data/bassline_extraction/beat_grid/beat_positions'):
-        os.mkdir('data/bassline_extraction/beat_grid/beat_positions')
-
-    if not os.path.exists('data/bassline_extraction/beat_grid/aligned_beat_positions'):
-        os.mkdir('data/bassline_extraction/beat_grid/aligned_beat_positions')
-
-    if not os.path.exists('data/bassline_extraction/beat_grid/bad_examples'):
-        os.mkdir('data/bassline_extraction/beat_grid/bad_examples')
-
-
-    if not os.path.exists('data/bassline_extraction/choruses'):
-        os.mkdir('data/bassline_extraction/choruses')   
-
-    if not os.path.exists('data/bassline_extraction/choruses/initial_chorus_estimates'):
-        os.mkdir('data/bassline_extraction/choruses/initial_chorus_estimates')
-
-    if not os.path.exists('data/bassline_extraction/choruses/aligned_choruses'):
-        os.mkdir('data/bassline_extraction/choruses/aligned_choruses')
-
-
-    if not os.path.exists('data/bassline_extraction/basslines'):
-        os.mkdir('data/bassline_extraction/basslines')
-
-    if not os.path.exists('data/bassline_extraction/basslines/processed'):
-        os.mkdir('data/bassline_extraction/basslines/processed')
-
-    if not os.path.exists('data/bassline_extraction/basslines/unprocessed'):
-        os.mkdir('data/bassline_extraction/basslines/unprocessed')
-
-
-    if not os.path.exists('data/bassline_extraction/experiment_logs'):
-        os.mkdir('data/bassline_extraction/experiment_logs')
 
 if __name__ == '__main__':
 

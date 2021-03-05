@@ -18,9 +18,9 @@ import librosa.display
 import soundfile as sf
 
 # High Level Audio Processing
-from madmom.features.beats import RNNBeatProcessor, BeatTrackingProcessor # Beat Tracking
+#from madmom.features.beats import RNNBeatProcessor, BeatTrackingProcessor # Beat Tracking
 from pychorus import find_and_output_chorus # Chorus Finder
-from spleeter.separator import Separator # Source Separaion
+#from spleeter.separator import Separator # Source Separaion
 
 import traceback
 import warnings
@@ -29,22 +29,22 @@ warnings.filterwarnings('ignore') # ignore librosa .mp3 warnings
 
 class Track:
     
-    def __init__(self, title, fs=44100, N_bars=4):
+    def __init__(self, title, track_dicts, scales, beat_proc, tracking_proc, separator, fs=44100, N_bars=4):
         
-        self.info = self.Info(title, fs, N_bars) # Track information class
+        self.info = self.Info(title, track_dicts, scales, fs, N_bars) # Track information class
         
         self.audio = self.Audio(self.info) # The track itself, may be unnecessary
         
         self.chorus = self.Chorus(self.info) # Chorus information
         
-        self.beatgrid = self.BeatGrid(self.info, self.chorus) # Beatgrid is formed
+        self.beatgrid = self.BeatGrid(self.info, self.chorus, beat_proc, tracking_proc) # Beatgrid is formed
         
-        self.separator = self.Separator(self.info, self.audio, self.chorus) # Bassline extractor is configured
+        self.separator = self.Separator(self.info, self.audio, self.chorus, separator) # Bassline extractor is configured
     
     
     class Info:
         
-        def __init__(self, title, fs, N_bars):
+        def __init__(self, title, track_dicts, scales, fs, N_bars):
             
             self.title = title
             self.track_dict = track_dicts[title]
@@ -116,22 +116,26 @@ class Track:
     
     class BeatGrid:
         
-        def __init__(self, info, chorus):
+        def __init__(self, info, chorus, beat_proc, tracking_proc):
             
             self.info = info
             self.chorus = chorus # CHANGE LATER???           
+
+            self.beat_proc = beat_proc
+            self.tracking_proc = tracking_proc
+
             self.beat_positions = self.find_beat_positions()
             self.analyze_beats()
             self.aligned_chorus_beat_positions = np.array([]) # init as empty array
               
         def find_beat_positions(self):
             
-            beat_proc = RNNBeatProcessor()
-            tracking_proc = BeatTrackingProcessor(fps=100)
+            #beat_proc = RNNBeatProcessor()
+            #tracking_proc = BeatTrackingProcessor(fps=100)
 
             # Find the beat positions
-            activations = beat_proc(self.info.path) # reads the input every time
-            beat_positions = tracking_proc(activations) # SHOULD I PASS ABOVE
+            activations = self.beat_proc(self.info.path) # reads the input every time
+            beat_positions = self.tracking_proc(activations) # SHOULD I PASS ABOVE
 
             return beat_positions
 
@@ -215,11 +219,12 @@ class Track:
         def export_aligned_beat_positions(self):
             np.save('data/bassline_extraction/beat_grid/aligned_beat_positions/{}.npy'.format(self.info.title), self.aligned_chorus_beat_positions)  
     
+
     class Separator:
         
-        def __init__(self, info, audio, chorus):
+        def __init__(self, info, audio, chorus, separator):
             
-            self.separator = Separator('spleeter:4stems')
+            #self.separator = Separator('spleeter:4stems')
             self.info = info
             self.audio = audio
             self.chorus = chorus
@@ -250,6 +255,7 @@ class Track:
             bassline_cut_normalized = librosa.util.normalize(bassline_cut) # normalize
             
             self.audio.processed_bassline = bassline_cut_normalized
+            
             
     def set_aligned_chorus(self): # PUT IN DATA OR WEHRE???
         
@@ -283,6 +289,9 @@ def init_folders():
         os.mkdir('data/bassline_extraction/beat_grid/bad_examples')
 
 
+    if not os.path.exists('data/bassline_extraction/choruses'):
+        os.mkdir('data/bassline_extraction/choruses')   
+
     if not os.path.exists('data/bassline_extraction/choruses/initial_chorus_estimates'):
         os.mkdir('data/bassline_extraction/choruses/initial_chorus_estimates')
 
@@ -300,6 +309,9 @@ def init_folders():
         os.mkdir('data/bassline_extraction/basslines/unprocessed')
 
 
+    if not os.path.exists('data/bassline_extraction/experiment_logs'):
+        os.mkdir('data/bassline_extraction/experiment_logs')
+
 if __name__ == '__main__':
 
     init_folders()
@@ -308,26 +320,26 @@ if __name__ == '__main__':
         scales = json.load(infile)
         
     with open('data/metadata/TechHouse_track_dicts.json','r') as infile:
-        track_dicts = json.load(infile) 
-        
+        track_dicts = json.load(infile)       
     #track_titles = list(track_dicts.keys())
 
-    with open('data/bassline_extraction/ouz_tracks.txt', 'r') as infile:
+    with open('data/ouz_tracks.txt', 'r') as infile:
         track_titles = infile.read().split('\n')
 
     date = str(dt.date.today()) # for tracking experiments
 
-    exceptions = []
-    key_errors = []
-    completed_tracks = []
-    erroneous_tracks = []
+    # init processors here for preventing leakage
+    beat_proc = RNNBeatProcessor()
+    tracking_proc = BeatTrackingProcessor(fps=100)
+    separator = Separator('spleeter:4stems')
+
     for title in tqdm(track_titles):
         
         try:
 
             print('\n'+title)
         
-            track = Track(title)
+            track = Track(title, track_dicts, scales, beat_proc, tracking_proc, separator)
             
             # export audio for later use
             #track.audio.export_audio()
@@ -361,8 +373,8 @@ if __name__ == '__main__':
             track.audio.export_bassline()
             track.audio.export_processed_bassline()
             
-            completed_tracks.append(title)
-            
+            with open('data/bassline_extraction/completed_tracks_{}.txt'.format(date), 'a') as outfile:
+                outfile.write(' \n'.join(title))            
             del track
             
         except KeyboardInterrupt:
@@ -370,23 +382,14 @@ if __name__ == '__main__':
             sys.exit()
             pass    
         except KeyError:
-            print("Key error on: {}\n".format(title))
-            key_errors.append(title)            
-        except Exception as ex:
-            
+            print("Key doesn't exist in track_dicts: {}\n".format(title))
+            with open('data/bassline_extraction/experiment_logs/key_errors_{}.txt'.format(date), 'a') as outfile:
+                outfile.write(title+'\n')            
+        except Exception as ex:     
             print("There was an error on: {}".format(title))
             exception_str = ''.join(traceback.format_exception(etype=type(ex), value=ex, tb=ex.__traceback__))
-            print(exception_str+'\n')
-            erroneous_tracks.append(title)
-            exceptions.append(exception_str)
-    with open('data/bassline_extraction/completed_tracks_{}.txt'.format(date), 'w') as outfile:
-        outfile.write(' \n'.join(completed_tracks))
-        
-    with open('data/bassline_extraction/error_log_{}.txt'.format(date), 'w') as outfile:
-        outfile.write(' \n'.join(erroneous_tracks))
-        
-    with open('data/bassline_extraction/key_errors_{}.txt'.format(date), 'w') as outfile:
-        outfile.write(' \n'.join(key_errors))
-
-    with open('data/bassline_extraction/exceptions_{}.txt'.format(date), 'w') as outfile:
-        outfile.write(' \n'.join(exceptions)) 
+            print(exception_str+'\n')       
+            with open('data/bassline_extraction/experiment_logs/exceptions_{}.txt'.format(date), 'a') as outfile:
+                outfile.write(exception_str+'\n')         
+            with open('data/bassline_extraction/experiment_logs/error_log_{}.txt'.format(date), 'a') as outfile:
+                outfile.write(title+'\n') 

@@ -341,7 +341,7 @@ if __name__ == '__main__':
             sys.exit()
             pass    
         except KeyError:
-            print("Key doesn't exist in track_dicts: {}\n".format(title))
+            print("Track doesn't exist in track_dicts: {}\n".format(title))
             with open('data/bassline_extraction/experiment_logs/key_errors_{}.txt'.format(date), 'a') as outfile:
                 outfile.write(title+'\n')            
         except Exception as ex:     

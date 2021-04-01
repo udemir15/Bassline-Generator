@@ -13,7 +13,6 @@ from utilities import get_progression_beat_positions, get_bar_positions, get_qua
 get_ipython().run_line_magic('matplotlib', 'inline')
 
 
-#colors = ['0.5','tab:orange','k','c','g','r','y','m','w','b','c','0.6','0.7','0.8','0.9','1.0']
 colors = ['r','tab:orange','k','c','g','y','m','w','b','c','0.5','0.6','0.7','0.8','0.9','1.0']
 
 root_dir = '/mnt/d/projects/bassline_extraction'
@@ -27,7 +26,7 @@ spectrogram_dir = os.path.join(spectral_plots_dir, 'spectrograms')
 note_spec_dir = os.path.join(spectral_plots_dir, 'notes')
 spectral_comparison_dir = os.path.join(spectral_plots_dir, 'comparisons')
 
-quantization_spec_dir = os.path.join(spectral_comparison_dir, 'quantization')
+#quantization_spec_dir = os.path.join(spectral_comparison_dir, 'quantization')
 confidence_filtering_spec_dir = os.path.join(spectral_comparison_dir, 'confidence_filtering')
 algorithm_comparison_spec_dir = os.path.join(spectral_comparison_dir, 'algorithm_comparison')
 
@@ -66,8 +65,8 @@ def form_beat_grid_waveform(title, audio_array, fs, ax):
     ax.vlines(quarter_beat_positions, -0.7, 0.7, alpha=0.8, color='k',linestyle='dashed', linewidths=3)
     ax.vlines(bar_positions, -1.1, 1.1, alpha=0.8, color='g',linestyle='dashed', linewidths=3)
     ax.set_xlim([-0.05, (len(audio_array)/fs)+0.05])
-    ax.xaxis.label.set_size(15)
-    ax.yaxis.label.set_size(15)
+    ax.xaxis.label.set_size(14)
+    ax.yaxis.label.set_size(14)
 
 
 def form_beat_grid_spectrogram(title, ax, spectrogram, fs, hop_length):
@@ -82,10 +81,14 @@ def form_beat_grid_spectrogram(title, ax, spectrogram, fs, hop_length):
     ax.vlines(beat_positions_plotting, 0, 256, alpha=0.8, color='w',linestyle='dashed', linewidths=3)
     ax.vlines(bar_positions, 0, 512, alpha=0.8, color='g',linestyle='dashed', linewidths=3)
     ax.set_xlim([-0.05, (spectrogram.shape[1]*hop_length/fs)+0.05])
-    ax.xaxis.label.set_size(15)
-    ax.yaxis.label.set_size(15)
-    ax.set_ylim([-5,512])
+    display_frequencies = np.array([0,32,48,64,96,128,256,512])
+    ax.yaxis.set_ticks(display_frequencies)
+    ax.set_yticklabels(display_frequencies, fontsize=12)  
+    ax.set_ylim([-5,512]) 
+    ax.yaxis.label.set_size(14)
+    ax.xaxis.label.set_size(14)
 
+     
 
 def form_pitch_track(F0_estimate, ax, color='b', label=''):
     """
@@ -128,8 +131,6 @@ def plot_spec(title, spectrogram, fs, hop_length, F0_estimate=None, save=False, 
 
 def plot_wave_spec(title, audio_array, spectrogram, fs, hop_length, F0_estimate=None, save=False, plot_title=''):
     
-    bar_positions, beat_positions_plotting, quarter_beat_positions = beat_plotting(title)
-    
     fig, ax = plt.subplots(figsize=(20,10), nrows=2, sharex=False, constrained_layout=True)
     fig.suptitle(title, fontsize=20)
 
@@ -146,8 +147,6 @@ def plot_wave_spec(title, audio_array, spectrogram, fs, hop_length, F0_estimate=
 
 
 def plot_wave_spec_notes(title, audio_array, spectrogram, fs, hop_length, bassline_notes, save=False, plot_title=''):
-       
-    bar_positions, beat_positions_plotting, quarter_beat_positions = beat_plotting(title)
     
     fig, ax = plt.subplots(figsize=(20,10), nrows=2, sharex=False, constrained_layout=True)
     fig.suptitle(title, fontsize=20)
@@ -171,8 +170,6 @@ def plot_wave_spec_notes(title, audio_array, spectrogram, fs, hop_length, bassli
 
 def plot_spec_notes(title, spectrogram, fs, hop_length, bassline_notes, save=False, plot_title=''):
     
-    bar_positions, beat_positions_plotting, quarter_beat_positions = beat_plotting(title)
-    
     fig, ax = plt.subplots(figsize=(20,8), constrained_layout=True)
     fig.suptitle(title, fontsize=20)
     
@@ -193,8 +190,6 @@ def plot_spec_notes(title, spectrogram, fs, hop_length, bassline_notes, save=Fal
     
 def plot_note_comparison(title, spectrogram, fs, hop_length, F0_estimate, bassline_notes, save=False, plot_title=''):
     
-    bar_positions, beat_positions_plotting, quarter_beat_positions = beat_plotting(title)
-    
     fig, ax = plt.subplots(figsize=(20,10), nrows=2, sharex=False, constrained_layout=True)
     fig.suptitle(title, fontsize=20)
 
@@ -207,7 +202,7 @@ def plot_note_comparison(title, spectrogram, fs, hop_length, F0_estimate, bassli
             form_pitch_track((note_dict['time'], note_dict['frequency']), ax[0], color=colors[i], label=note) 
         
     ax[0].legend(loc=1, fontsize=12) 
-     
+
     form_beat_grid_spectrogram(title, ax[1], spectrogram, fs, hop_length)
     
     form_pitch_track(F0_estimate, ax[1])

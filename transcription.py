@@ -70,6 +70,9 @@ def pYIN_F0(audio, fs, frame_length, threshold='none'):
     else:
         assert threshold < 1.0 and threshold > 0, 'Threshold must be inside (0, 1)'
 
+
+    F0 = np.round(F0, 2) # round to 2 decimals
+
     F0_filtered = np.array(confidence_filter(F0, confidence, threshold))
 
     time_axis = np.arange(len(F0)) * (hop_length/fs)
@@ -209,6 +212,7 @@ def sample_and_hold(bin_freqs, N_samples):
 def calcRegionBounds(bool_array):
     '''
     Returns the lower and upper bounds of contiguous regions.
+    Upper bound is not included in the region i.e [start, end)
 
     Parameters
     ==========
@@ -247,7 +251,6 @@ def uniform_quantization(pitch_track, segments, scale_frequencies, epsilon=4):
     Uniformly quantizes each given segment independently.
     """
 
-    # Find the voiced regions 
     boundaries, lengths, indices = segments
 
     # Form the Pitch Histogram and Do Majority Voting for each eegion independently
@@ -267,6 +270,106 @@ def uniform_quantization(pitch_track, segments, scale_frequencies, epsilon=4):
     return  pitch_track_quantized
 
 
+def find_closest_quarter_beat(time, quarter_beat_positions):
+    
+    delta = np.abs(time - quarter_beat_positions)
+    delta_min = np.min(delta)
+    idx = np.where(delta==delta_min)[0][0]
+        
+    return idx, quarter_beat_positions[idx]
+
+
+def find_closest_note(beat_time, time_axis):
+    
+    delta = np.abs(beat_time - time_axis)
+    delta_min = np.min(delta)
+    
+    return np.where(delta==delta_min)[0][0]    
+
+
+def segment_voiced_regions(time_axis, region_boundries, quarter_beat_positions):
+    """
+    Segments voiced regions if they have proper length, otherwise categorizes them.
+    """
+    
+    quarter_beat_positions -= quarter_beat_positions[0] # start from time 0
+
+    delta_time = np.diff(time_axis).max()/2 # maximum allowed distance deviation for beatgrid from the notes
+
+    segmented_good_regions = [] # good regions 
+    okay_region_boundaries = [] # okayish regions
+    bad_region_boundaries = []  # bad regions
+
+    # for each voiced region
+    for onset_idx, upper_bound in region_boundries:
+
+        offset_idx = upper_bound - 1 # upper bound is excluded
+
+        region_length = offset_idx - onset_idx + 1 
+
+        if region_length > 8: # if region length is suitable for segmentation
+
+            segment_boundaries = [] # segmentation boundaries
+
+
+            # get the times. Upper bounds of regions are excluded
+            onset_time, offset_time = time_axis[onset_idx], time_axis[offset_idx]
+            
+            # find the closest quarter beats to the onset and offset times 
+            start_beat_idx, start_beat_time = find_closest_quarter_beat(onset_time, quarter_beat_positions) 
+            end_beat_idx, end_beat_time = find_closest_quarter_beat(offset_time, quarter_beat_positions)
+
+            # make sure that onset starts before a qbeat and the offest ends after a qbeat
+            if onset_time > start_beat_time and delta_time <=  onset_time - start_beat_time:
+                start_beat_idx += 1
+                start_beat_time = quarter_beat_positions[start_beat_idx]
+
+            if offset_time < end_beat_time and delta_time <= end_beat_time - offset_time :
+                end_beat_idx -= 1
+                end_beat_time = quarter_beat_positions[end_beat_idx]
+
+
+            # segmentation starts with the onset idx and the closest quarter beat's corresponding idx    
+            b1 = onset_idx
+            b2 = find_closest_note(start_beat_time, time_axis)
+            if not b1 == b2: # onset on quarter beat
+                segment_boundaries.append([b1, b2])
+                
+            # segment between each qbeat inside the adjusted region 
+            for k in np.arange(start_beat_idx, end_beat_idx):
+
+                # get the qbeat times
+                start_beat_time = quarter_beat_positions[k] 
+                end_beat_time = quarter_beat_positions[k+1]
+
+                # get the corresponding indices in the pitch track
+                b1 = find_closest_note(start_beat_time, time_axis)
+                b2 = find_closest_note(end_beat_time, time_axis)
+
+                segment_boundaries.append([b1, b2])
+                
+            # segmentation finishes with the final qbeat and the upper_bound = offset idx+1
+            b1 = find_closest_note(quarter_beat_positions[end_beat_idx], time_axis)
+            b2 = upper_bound # upper bounds are excluded ()
+            if not b1 == b2: # offset on quarter beat
+                segment_boundaries.append([b1, b2])
+
+            segmented_good_regions.append(segment_boundaries)
+
+        elif region_length >= 4: # if the region can be uniformly quantized
+
+            okay_region_boundaries.append([onset_idx, upper_bound])
+
+        else: # if the region will be erased
+               
+            bad_region_boundaries.append([onset_idx, upper_bound])
+
+    okay_regions = get_region_information(np.array(okay_region_boundaries))
+    bad_regions = get_region_information(np.array(bad_region_boundaries))
+
+    return segmented_good_regions, okay_regions, bad_regions
+
+
 def uniform_voiced_region_quantization(pitch_track, scale_frequencies, epsilon=4):
     """
     Finds the voiced regions, and uniformly quantizes each region in frequency using majority voting.
@@ -279,119 +382,27 @@ def uniform_voiced_region_quantization(pitch_track, scale_frequencies, epsilon=4
     return  pitch_track_quantized
 
 
-def find_closest_quarter_beat(time, quarter_beat_positions):
-    
-    delta = np.abs(time - quarter_beat_positions)
-    delta_min = np.min(delta)
-        
-    return np.where(delta==delta_min)[0][0]
-
-
-def find_closest_note(beat_time, time_axis):
-    
-    delta = np.abs(beat_time - time_axis)
-    delta_min = np.min(delta)
-    
-    return np.where(delta==delta_min)[0][0]    
-
-
-def segment_voiced_regions(time_axis, voiced_boundaries, quarter_beat_positions):
-    """
-    Segments voiced regions if they have proper length, otherwise categorizes them.
-    """
-    
-    quarter_beat_positions -= quarter_beat_positions[0] # start from 0
-
-    segment_boundaries = [] # good regions' segmentation boundaries
-    okay_region_boundaries = [] # okayish regions
-    bad_region_boundaries = [] # bad regions
-
-    # for each voiced region
-    for onset_idx, offset_idx in voiced_boundaries:
-
-        if offset_idx-onset_idx >= 8: # if region length is suitable for segmentation
-
-            # get the times 
-            onset_time = time_axis[onset_idx]
-            offset_time = time_axis[offset_idx-1] # end boundary not included
-
-
-            # find the closest quarter beats to the onset and offset times and 
-            # make sure that onset starts before the beat and the offest ends after a beat
-            start_beat_idx = find_closest_quarter_beat(onset_time, quarter_beat_positions)   
-            if quarter_beat_positions[start_beat_idx] < onset_time:            
-                start_beat_idx += 1
-
-            start_beat_time = quarter_beat_positions[start_beat_idx] 
-
-            end_beat_idx = find_closest_quarter_beat(offset_time, quarter_beat_positions)
-            if quarter_beat_positions[end_beat_idx] > offset_time:
-                end_beat_idx -= 1
-
-            end_beat_time = quarter_beat_positions[end_beat_idx]
-
-
-            # segmentation starts with the onset idx and the closest quarter beat's corresponding idx    
-            b1 = onset_idx
-            b2 = find_closest_note(start_beat_time, time_axis)
-
-            if not b1 == b2: # onset on quarter beat
-                segment_boundaries.append([b1, b2])
-                
-            # segment between each qbeat inside the adjusted region 
-            for k in np.arange(start_beat_idx, end_beat_idx+1):
-
-                if k == end_beat_idx:
-                    break
-
-                # get the qbeat times
-                start_beat_time = quarter_beat_positions[k] 
-                end_beat_time = quarter_beat_positions[k+1]
-
-                # get the corresponding indices in the pitch track
-                b1 = find_closest_note(start_beat_time, time_axis)
-                b2 = find_closest_note(end_beat_time, time_axis)
-
-                segment_boundaries.append([b1, b2])
-                
-            # segmentation finishes with the final qbeat and the offset idx
-            b1 = find_closest_note(quarter_beat_positions[k], time_axis)
-            b2 = offset_idx-1
-
-            if not b1 == b2: # onset on quarter beat
-                segment_boundaries.append([b1, b2])
-
-        elif offset_idx-onset_idx >= 4: # if region can be uniformly quantized
-
-            okay_region_boundaries.append([onset_idx, offset_idx])
-
-        else: # if region will be erased
-               
-            bad_region_boundaries.append([onset_idx, offset_idx])
-
-    segments = get_region_information(np.array(segment_boundaries))
-    okay_regions = get_region_information(np.array(okay_region_boundaries))
-    bad_regions = get_region_information(np.array(bad_region_boundaries))
-
-    return segments, okay_regions, bad_regions
-
-
 def adaptive_voiced_region_quantization(pitch_track, quarter_beat_positions, scale_frequencies, epsilon=4):
     """
     
     """
 
     # Find the voiced regions
-    voiced_boundaries, region_lengths, voiced_indices = find_voiced_regions(pitch_track[1])
+    voiced_boundaries, _, _ = find_voiced_regions(pitch_track[1])
 
     # segment the voiced regions
-    segments, okay_regions, bad_regions = segment_voiced_regions(pitch_track[0], 
+    segmented_good_regions, okay_regions, bad_regions = segment_voiced_regions(pitch_track[0], 
                                                                     voiced_boundaries, 
                                                                     quarter_beat_positions)
 
+    # flatten the boundaries, and create segment tupple = (bounds, lens, indices)
+    good_regions = get_region_information(np.array([bounds for region in segmented_good_regions for bounds in region]))
 
     # Uniformly quantize each segmented region independtly 
-    pitch_track_quantized = uniform_quantization(pitch_track, segments, scale_frequencies, epsilon)
+    pitch_track_quantized = uniform_quantization(pitch_track, good_regions, scale_frequencies, epsilon)
+
+    # Merge the onsets and the offsets using segmented_good_regions
+    pitch_track_quantized = onset_offset_merger(pitch_track_quantized, segmented_good_regions)
 
     # Uniformly quantize okay regions, without segmentation
     pitch_track_quantized = uniform_quantization(pitch_track_quantized, okay_regions, scale_frequencies, epsilon)
@@ -402,10 +413,62 @@ def adaptive_voiced_region_quantization(pitch_track, quarter_beat_positions, sca
     return pitch_track_quantized
 
 
-def onset_offset_merger(pitch_track_quantized, segments):
+def onset_offset_merger(pitch_track, regions):
+    """
+    Merges the onset with the following segment and/or the offset with the previous segment.
+    """
 
-    
+    F0 = pitch_track[1].copy()
+    no_regions = len(regions)
 
+    for region_idx, region_segments in enumerate(regions): # for each segment in the region
+
+        no_segments = len(region_segments)
+
+        if no_segments > 2: # straightforward merging
+       
+            for segment_idx, (start, end) in enumerate(region_segments): # get the segment boundaries
+
+                segment_length = end - start
+
+                if segment_length < 8: # if the current segment has small length, apply merging
+
+                    if segment_idx == 0: # onset merging
+
+                        ns, _ = region_segments[segment_idx+1] # start idx of the next segment
+                        f = F0[ns] # get the closest sample from the next segment
+                        
+                        F0[start:end] = f # replace the original samples
+
+                    if segment_idx == no_segments-1: # offset merging
+
+                        _, pe = region_segments[segment_idx-1] # an idx from the previous segment
+                        f = F0[pe-1] # get the closest sample from the previous segment
+
+                        F0[start:end] = f # replace the original samples
+
+        elif no_segments == 2: #if there are 2 segments, ve take care of cases
+
+            ps, pe = region_segments[0]
+            ns, ne = region_segments[1]
+
+            len1, len2 = pe-ps, ne-ns
+
+            if not (len1==8 and len2==8):
+
+                if len1>len2:
+                    f = F0[pe-1]
+                    F0[ns : ne] = f
+                else:
+                    f = F0[ns]
+                    F0[ps : pe] = f
+
+        else: # for single segment it can not be length smaller than 8 anyway
+            continue
+
+
+    return (pitch_track[0], F0)
+                            
 
 def region_silencer(pitch_track, bad_regions):
     """

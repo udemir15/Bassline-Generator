@@ -1,3 +1,4 @@
 *.hdf5
 data/*
 plots/*
+jupyter_submit.sh

@@ -3,3 +3,4 @@ data/*
 plots/*
 jupyter_submit.sh
 .ipynb_checkpoints
+*.log

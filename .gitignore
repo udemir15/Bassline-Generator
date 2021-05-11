@@ -4,4 +4,6 @@ plots/*
 jupyter_submit.sh
 .ipynb_checkpoints
 *.log
-generator/Models/*
+*/Models/*
+*/Datasets/*
+*/figures/*

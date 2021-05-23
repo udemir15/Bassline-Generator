@@ -7,3 +7,4 @@ jupyter_submit.sh
 */Models/*
 */Datasets/*
 */figures/*
+*/wandb/*

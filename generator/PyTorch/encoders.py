@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from models import LSTMnetwork
 
-class StackedUnidirectionalLSTMEncoder(nn.Module):
+class StackedUnidirLSTMEncoder(nn.Module):
     """
     Stacked Unidirectional LSTM Encoder
     """
@@ -19,18 +19,18 @@ class StackedUnidirectionalLSTMEncoder(nn.Module):
         
         super().__init__()
         
-        self.embed = nn.Embedding(num_embeddings, embedding_dim).to(device)
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim).to(device)
         self.net = LSTMnetwork(embedding_dim, hidden_size, 1, num_layers, dropout, batch_size, device).to(device)
         
     def forward(self, x):
              
-        x = self.embed(x)
+        x = self.embedding(x)
         
         y, (h, c) = self.net(x)
             
         return y[:,-1,:], (h, c)
     
-class StackedBidirectionalLSTMEncoder(nn.Module):
+class StackedBidirLSTMEncoder(nn.Module):
     
     def __init__(self,
                 num_embeddings,
@@ -47,12 +47,12 @@ class StackedBidirectionalLSTMEncoder(nn.Module):
         self.batch_size = batch_size
         self.hidden_size = hidden_size
         
-        self.embed = nn.Embedding(num_embeddings, embedding_dim).to(device)
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim).to(device)
         self.net = LSTMnetwork(embedding_dim, hidden_size, 2, num_layers, dropout, batch_size, device).to(device)
         
     def forward(self, x):
              
-        x = self.embed(x)
+        x = self.embedding(x)
         y, (h, c) = self.net(x)
         
         # reshape to (Batch, Seq, Directions, Hidden), sum both directions

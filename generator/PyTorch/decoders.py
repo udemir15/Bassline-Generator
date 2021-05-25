@@ -3,7 +3,7 @@ import torch.nn as nn
 
 from models import LSTMnetwork
     
-class StackedUnidirectionalLSTMDecoder(nn.Module):
+class StackedUnidirLSTMDecoder(nn.Module):
     
     def __init__(self,
                  input_size,
@@ -11,18 +11,20 @@ class StackedUnidirectionalLSTMDecoder(nn.Module):
                  dropout,
                  batch_size,
                  sequence_length,
-                 device):
+                 device,
+                teacher_forcing_ratio=0.0):
         
         super().__init__()
         
-        self.sequence_length = sequence_length 
+        self.sequence_length = sequence_length
+        self.teacher_forcing_ratio=teacher_forcing_ratio
         
         # decoder outputs are fed as inputs
         self.rnn = LSTMnetwork(input_size, input_size, 1, num_layers, dropout, batch_size, device)
                 
-    def forward(self, x, hidden):
+    def forward(self, x, hidden, targets=None):
         """
-        input is the last output of the encoder network. (batch, feat)
+        input is the last output of the encoder network. shape: (batch, feat)
         """
         
         # (Batch, 1, feat)
@@ -32,9 +34,15 @@ class StackedUnidirectionalLSTMDecoder(nn.Module):
         for i in range(self.sequence_length): # for each time step
             
             y, hidden = self.rnn(y, hidden)        
-            outputs.append(y) # record the output            
+            outputs.append(y) # record the output
+            
+            if self.teacher_forcing_ratio > torch.rand(1):
+                y = targets[:,1]
                
         return torch.cat(outputs, dim=1)
+    
+    def init_hidden_cell_states(self, random=False):
+        return self.rnn.init_hidden_cell_states(random)
 
 class StackedUnidirLSTMDenseDecoder(nn.Module):
     """
@@ -52,22 +60,25 @@ class StackedUnidirLSTMDenseDecoder(nn.Module):
         
         super().__init__()
         
-        self.rnn =  StackedUnidirectionalLSTMDecoder(input_size, num_layers, dropout, batch_size, sequence_length, device)
+        self.batch_size = batch_size
+        self.input_size = input_size
+        
+        self.rnn =  StackedUnidirLSTMDecoder(input_size, num_layers, dropout, batch_size, sequence_length, device)
         self.dense = nn.Linear(input_size, output_size)
 
-
         # ACTIVATION ?????????????*
-
-
     def forward(self, x, hidden):
         
         y = self.rnn(x, hidden)
         output = self.dense(y)
         
         return output
+    
+    def init_hidden_cell_states(self, random=False):
+        return self.rnn.init_hidden_cell_states(random)
 
 
-class StackedUnidirectionalLSTMDecoderwithEmbedding(nn.Module):
+class StackedUnidirLSTMDecoderwithEmbedding(nn.Module):
     
     def __init__(self,
                 num_embeddings, # K by definition (for sampling procedure)
@@ -87,7 +98,7 @@ class StackedUnidirectionalLSTMDecoderwithEmbedding(nn.Module):
         self.batch_size = batch_size
        
         # Embed the inputs
-        self.embeddding = nn.Embedding(num_embeddings, embedding_dim)
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
 
         # decoder outputs are fed as inputs
         self.rnn = LSTMnetwork(embedding_dim, hidden_size, 1, num_layers, dropout, batch_size, device)
@@ -106,9 +117,9 @@ class StackedUnidirectionalLSTMDecoderwithEmbedding(nn.Module):
         for _ in range(self.sequence_length): # for each time step
 
             class_idx = y.argmax(-1)
-            embed = self.embeddding(class_idx)
+            x = self.embedding(class_idx)
             
-            y, hidden = self.rnn(embed, hidden)   
+            y, hidden = self.rnn(x, hidden)   
 
             y = self.dense(y)
 

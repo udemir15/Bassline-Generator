@@ -4,11 +4,11 @@ import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 
-def load_data(data_params):
+def load_data(data_params): #, dataset_prefix='bassline_representations'
     
     dataset_path, scale_type, M = data_params['dataset_path'], data_params['scale_type'], data_params['M']
     
-    dataset_name = 'bassline_representations_{}_M{}.csv'.format(scale_type, M)
+    dataset_name = data_params['dataset_name'] +'_{}_M{}.csv'.format(scale_type, M)
 
     dataset_dir = os.path.join(dataset_path, dataset_name)
 
@@ -17,7 +17,7 @@ def load_data(data_params):
     # First column is title
     X = df[df.columns[1:]].to_numpy()
     
-    X = fix_class_labels(X)
+    #X = fix_class_labels(X)
     
     return X
     

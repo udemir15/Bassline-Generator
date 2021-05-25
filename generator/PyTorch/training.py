@@ -1,15 +1,17 @@
-from tqdm import tqdm
-import torch
+import os
+
 import numpy as np
+import torch
 
 import datetime as dt
-
+from tqdm import tqdm
 #import wandb
 #wandb.login()
 
 from dataloaders import load_data, create_loaders
 
 
+#TODO: main_WANDB
 def main(model, train_loader, test_loader, optimizer, criterion, train_args, device):
     
     train_losses, test_losses = [], [test(model, test_loader, criterion, device)]
@@ -66,3 +68,15 @@ def test(model, loader, criterion, device):
             test_loss.append(loss.item())
     
     return np.mean(test_loss)
+
+def checkpoint(model_name, model, optimizer, epoch):
+
+    model_path = os.path.join('model_checkpoints', model_name+'.pt')
+
+    torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                #'train_loss': train_loss,
+                #'test_loss': test_loss
+                }, model_path)

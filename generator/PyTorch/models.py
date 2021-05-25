@@ -48,7 +48,7 @@ class LSTMnetwork(nn.Module):
             return (torch.randn(shape, device=self.device), torch.randn(shape, device=self.device))                     
         else:
             return (torch.zeros(shape, device=self.device), torch.zeros(shape, device=self.device))
-    
+
         
 class VanillaAutoEncoder(nn.Module):
     
@@ -68,12 +68,9 @@ class VanillaAutoEncoder(nn.Module):
     
     def sample(self ,x):
         
-        x = torch.zeros((self.decoder.batch_size, self.decoder.input_size)).cuda()
-        
-        (h, c) = self.decoder.init_hidden_cell_states(random=True)
-        
-        sample = self.decoder(x, (h, c))
-        
+        x = torch.zeros((self.decoder.batch_size, self.decoder.input_size)).cuda()        
+        (h, c) = self.decoder.init_hidden_cell_states(random=True)    
+        sample = self.decoder(x, (h, c))        
         return sample.argmax(dim=-1)
     
 

@@ -11,18 +11,16 @@ class StackedUnidirLSTMDecoder(nn.Module):
                  dropout,
                  batch_size,
                  sequence_length,
-                 device,
-                teacher_forcing_ratio=0.0):
+                 device):
         
         super().__init__()
         
         self.sequence_length = sequence_length
-        self.teacher_forcing_ratio=teacher_forcing_ratio
         
         # decoder outputs are fed as inputs
         self.rnn = LSTMnetwork(input_size, input_size, 1, num_layers, dropout, batch_size, device)
                 
-    def forward(self, x, hidden, targets=None):
+    def forward(self, x, hidden):
         """
         input is the last output of the encoder network. shape: (batch, feat)
         """
@@ -34,10 +32,7 @@ class StackedUnidirLSTMDecoder(nn.Module):
         for i in range(self.sequence_length): # for each time step
             
             y, hidden = self.rnn(y, hidden)        
-            outputs.append(y) # record the output
-            
-            if self.teacher_forcing_ratio > torch.rand(1):
-                y = targets[:,1]
+            outputs.append(y) # record the output           
                
         return torch.cat(outputs, dim=1)
     
@@ -65,8 +60,9 @@ class StackedUnidirLSTMDenseDecoder(nn.Module):
         
         self.rnn =  StackedUnidirLSTMDecoder(input_size, num_layers, dropout, batch_size, sequence_length, device)
         self.dense = nn.Linear(input_size, output_size)
-
         # ACTIVATION ?????????????*
+        
+        
     def forward(self, x, hidden):
         
         y = self.rnn(x, hidden)

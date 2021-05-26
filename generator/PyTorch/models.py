@@ -52,28 +52,36 @@ class LSTMnetwork(nn.Module):
         
 class VanillaAutoEncoder(nn.Module):
     
-    def __init__(self, encoder, decoder):
+    def __init__(self, embedding, encoder, decoder):
         
         super().__init__()
         
+        self.embedding = embedding
         self.encoder = encoder
         self.decoder = decoder
                    
     def forward(self, x):
-                
-        y, (h, c) = self.encoder(x)
-        output_sequence = self.decoder(y, (h, c))
-               
-        return output_sequence.permute(0,2,1) # for loss calculation
-    
-    def sample(self ,x):
         
-        x = torch.zeros((self.decoder.batch_size, self.decoder.input_size)).cuda()        
-        (h, c) = self.decoder.init_hidden_cell_states(random=True)    
-        sample = self.decoder(x, (h, c))        
+        x_embed = self.embedding(x)
+                
+        y, (h, c) = self.encoder(x_embed)
+        
+        if self.decoder.teacher_forcing_ratio != 0.0:
+            output_sequence = self.decoder(y, (h, c), x_embed)
+        else: 
+            output_sequence = self.decoder(y, (h, c), None) 
+            
+        return output_sequence.permute(0,2,1) # for loss calculation
+        
+    # DECODER INPUT????????
+    def sample(self ,x):
+        with torch.no_grad():
+            x = torch.zeros((self.decoder.batch_size, self.decoder.input_size)).cuda()        
+            (h, c) = self.decoder.init_hidden_cell_states(random=True)    
+            sample = self.decoder(x, (h, c), None)        
         return sample.argmax(dim=-1)
+       
     
-
 class IOTransformer(nn.Module):    
     
     def __init__(self, encoder_hidden_size, decoder_hidden_size, decoder_num_embeddings):
@@ -123,11 +131,10 @@ class AutoEncoder(nn.Module):
         """
         Feeds the decoder with a tensor corresponding to the given note_idx to sample batch of basslines.
         """
-        x = torch.zeros((self.decoder.batch_size, self.decoder.num_embeddings), device=self.device)
-        x[note_idx] = 1 # for argmax
-
-        h, c = self.decoder.rnn.init_hidden_cell_states(random=True)
-
-        sample = self.decoder(x, (h, c))
-
+        
+        with torch.no_grad():
+            x = torch.zeros((self.decoder.batch_size, self.decoder.num_embeddings), device=self.device)
+            x[note_idx] = 1 # for argmax
+            h, c = self.decoder.rnn.init_hidden_cell_states(random=True)
+            sample = self.decoder(x, (h, c))
         return sample.argmax(dim=-1)

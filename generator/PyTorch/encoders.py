@@ -9,8 +9,7 @@ class StackedUnidirLSTMEncoder(nn.Module):
     """
     
     def __init__(self,
-                num_embeddings,
-                embedding_dim,
+                input_size, #embedding_dim
                 hidden_size,
                 num_layers,
                 dropout,
@@ -19,22 +18,20 @@ class StackedUnidirLSTMEncoder(nn.Module):
         
         super().__init__()
         
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim).to(device)
-        self.net = LSTMnetwork(embedding_dim, hidden_size, 1, num_layers, dropout, batch_size, device).to(device)
+        self.net = LSTMnetwork(input_size, hidden_size, 1, num_layers, dropout, batch_size, device).to(device)
         
-    def forward(self, x):
-             
-        x = self.embedding(x)
+    def forward(self, x):             
+        """Takes embedded inputs x: shape (Batch, Time, Embed)"""
         
         y, (h, c) = self.net(x)
             
         return y[:,-1,:], (h, c)
     
+    
 class StackedBidirLSTMEncoder(nn.Module):
     
     def __init__(self,
-                num_embeddings,
-                embedding_dim,
+                 input_size,
                 hidden_size,
                 num_layers,
                 dropout,
@@ -47,12 +44,11 @@ class StackedBidirLSTMEncoder(nn.Module):
         self.batch_size = batch_size
         self.hidden_size = hidden_size
         
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim).to(device)
-        self.net = LSTMnetwork(embedding_dim, hidden_size, 2, num_layers, dropout, batch_size, device).to(device)
+        self.net = LSTMnetwork(input_size, hidden_size, 2, num_layers, dropout, batch_size, device).to(device)
         
     def forward(self, x):
-             
-        x = self.embedding(x)
+        """Takes embedded inputs x: shape (Batch, Time, Embed)"""
+        
         y, (h, c) = self.net(x)
         
         # reshape to (Batch, Seq, Directions, Hidden), sum both directions
@@ -61,6 +57,6 @@ class StackedBidirLSTMEncoder(nn.Module):
         # reshape to (Layers, Directions, Batch, Hidden) and sum both directions
         h = torch.sum(h.reshape(self.num_layers, 2, self.batch_size, self.hidden_size), dim=1)
         c = torch.sum(c.reshape(self.num_layers, 2, self.batch_size, self.hidden_size), dim=1)
-        
+                
         # return last time step of the output
         return y[:,-1,:], (h, c)

@@ -8,6 +8,8 @@ from tqdm import tqdm
 #import wandb
 #wandb.login()
 
+from sklearn.metrics import accuracy_score
+
 from dataloaders import load_data, create_loaders
 
 
@@ -31,43 +33,75 @@ def main(model, train_loader, test_loader, optimizer, criterion, train_args, dev
     
     return train_losses, test_losses
 
+
+def calculate_accuracy(target_batch, input_batch):
+    """shapes: (B, T) """
+       
+    accuracies = [accuracy_score(t, i, normalize=True) for t, i in zip(target_batch, input_batch)]
+       
+    #for i, acc in enumerate(accuracies):
+        #if acc > 0.9:
+        #    print('Target')
+        #    print(target_batch[i,:])
+        #    print('Input')
+        #    print(input_batch[i,:])
+        #    print('\n')
+      
+    return np.sum(accuracies) / target_batch.shape[0]
+
+
 def train(model, loader, optimizer, criterion, device):
+    """One epoch of training."""
     
     model.train()
     
-    train_loss  = []
+    train_losses, batch_accuracies  = [], []
     for x in loader:
         
-        x= x.to(device)  
+        x = x.to(device) # shape: (B, T)
                 
         optimizer.zero_grad()
-        y_pred = model(x)
+        activations = model(x) #shape: (B, K, T)
         
-        loss = criterion(y_pred, x)
-        loss.backward() # retain_graph=True
+        loss = criterion(activations, x)
+        loss.backward()
         optimizer.step()
         
-        train_loss.append(loss.item())
-        loss.detach()
+        y_pred = activations.argmax(1)
+        acc = calculate_accuracy(x.cpu().numpy(), y_pred.cpu().numpy())
+        batch_accuracies.append(acc)
         
-    return np.mean(train_loss)
+        loss.detach()
+        train_losses.append(loss.item())        
+        
+    mean_epoch_loss = np.mean(train_losses)
+    mean_epoch_accuracy = np.mean(batch_accuracies)
+        
+    return mean_epoch_loss, mean_epoch_accuracy
 
 def test(model, loader, criterion, device):
     
     model.eval()
     
-    test_loss = []
+    test_losses, batch_accuracies = [], []
     for x in loader:
         with torch.no_grad():
                         
             x = x.to(device)       
-            y_pred = model(x)
+            activations = model(x)
 
-            loss = criterion(y_pred, x)
-
-            test_loss.append(loss.item())
+            loss = criterion(activations, x)
+            test_losses.append(loss.item())
+            
+            y_pred = activations.argmax(1)
+            acc = calculate_accuracy(x.cpu().numpy(), y_pred.cpu().numpy())
+            batch_accuracies.append(acc)
+            
+    mean_test_loss = np.mean(test_losses)
+    mean_test_accuracy = np.mean(batch_accuracies) 
     
-    return np.mean(test_loss)
+    return mean_test_loss, mean_test_accuracy
+
 
 def checkpoint(model_name, model, optimizer, epoch):
 
@@ -77,6 +111,4 @@ def checkpoint(model_name, model, optimizer, epoch):
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                #'train_loss': train_loss,
-                #'test_loss': test_loss
                 }, model_path)

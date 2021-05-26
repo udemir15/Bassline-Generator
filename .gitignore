@@ -11,3 +11,4 @@ jupyter_submit.sh
 *.pt
 __pycache__/
 wandb/
+*/model_checkpoints/*

@@ -37,16 +37,7 @@ def main(model, train_loader, test_loader, optimizer, criterion, train_args, dev
 def calculate_accuracy(target_batch, input_batch):
     """shapes: (B, T) """
        
-    accuracies = [accuracy_score(t, i, normalize=True) for t, i in zip(target_batch, input_batch)]
-       
-    #for i, acc in enumerate(accuracies):
-        #if acc > 0.9:
-        #    print('Target')
-        #    print(target_batch[i,:])
-        #    print('Input')
-        #    print(input_batch[i,:])
-        #    print('\n')
-      
+    accuracies = [accuracy_score(t, i, normalize=True) for t, i in zip(target_batch, input_batch)]   
     return np.sum(accuracies) / target_batch.shape[0]
 
 
@@ -103,12 +94,23 @@ def test(model, loader, criterion, device):
     return mean_test_loss, mean_test_accuracy
 
 
-def checkpoint(model_name, model, optimizer, epoch):
+def checkpoint(model_name, model, optimizer, validation_acc, epoch):
 
     model_path = os.path.join('model_checkpoints', model_name+'.pt')
 
-    torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                }, model_path)
+    if epoch != 0:
+        old_state = torch.load(model_path)
+        if old_state['validation_acc'] > validation_acc:
+            torch.save({
+                        'epoch': epoch,
+                        'model_state_dict': model.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'validation_acc': validation_acc
+                        }, model_path)
+    else:
+        torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'validation_acc': validation_acc
+                    }, model_path)

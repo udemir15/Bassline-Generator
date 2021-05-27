@@ -32,6 +32,9 @@ class LSTMnetwork(nn.Module):
     def forward(self, x, hidden=None):
         """
         Processes all the time steps in the batch at once.
+        x:  (B, T, F)
+        h,c : (L*D, B, H)
+        out: (B, T, D*H)-- last layer
         """
         
         if hidden is None:
@@ -80,7 +83,36 @@ class VanillaAutoEncoder(nn.Module):
             (h, c) = self.decoder.init_hidden_cell_states(random=True)    
             sample = self.decoder(x, (h, c), None)        
         return sample.argmax(dim=-1)
-       
+
+
+class Seq2Seq(nn.Module):
+    
+    def __init__(self, encoder, decoder):
+        
+        super().__init__()
+        
+        self.encoder = encoder
+        self.decoder = decoder
+                   
+    def forward(self, targets):
+        """targets: int tensor  (B, F)"""
+                      
+        _, hidden_enc = self.encoder(targets)
+
+        SOS_vector = targets[:,0] # shape: (B)
+
+        # teacher forcing with targets during training
+        output_sequence = self.decoder(SOS_vector, hidden_enc, targets) # shape: (B, K, T)
+        
+        return output_sequence # .permute(0,2,1) # for loss calculation
+              
+    def sample(self, SOS=0):
+        with torch.no_grad():
+            x = SOS*torch.ones((self.decoder.batch_size), dtype=torch.int64).cuda()
+            hidden = self.decoder.init_hidden_cell_states(random=True)
+            samples = self.decoder(x, hidden, None)        
+        return samples.argmax(1)
+
     
 class IOTransformer(nn.Module):    
     

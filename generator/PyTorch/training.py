@@ -1,116 +1,252 @@
 import os
-
-import numpy as np
-import torch
-
 import datetime as dt
+import numpy as np
+
+import matplotlib.pyplot as plt
+
+import torch
+import torch.nn as nn
+
 from tqdm import tqdm
-#import wandb
-#wandb.login()
 
-from sklearn.metrics import accuracy_score
+import models, encoders, decoders
+from metrics import calculate_accuracy, lehvenstein_distance
 
-from dataloaders import load_data, create_loaders
+WANDB_API_KEY= '52c84ab3f3b5c1f999c7f5f389f5e423f46fc04a'
+import wandb
+wandb.login()
 
+def make(encoder_params, decoder_params, device, criterion_weights=None):
 
-#TODO: main_WANDB
-def main(model, train_loader, test_loader, optimizer, criterion, train_args, device):
+    encoder = encoders.Seq2SeqEncoder(**encoder_params).to(device)
+    decoder = decoders.Seq2SeqDecoder(**decoder_params).to(device)
+    model = models.Seq2Seq(encoder, decoder).to(device)
+    model.init_weights()
+
+    print(model)
+    print('Number of parameters: {}'.format(sum([parameter.numel() for parameter in model.parameters()])))
+
+    criterion = nn.CrossEntropyLoss(reduction='mean', weight=criterion_weights)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     
-    train_losses, test_losses = [], [test(model, test_loader, criterion, device)]
-    print('Test Loss Before Training: {:.6f}'.format(test_losses[-1]))
-    
-    for epoch in tqdm(range(train_args['N_epochs'])):
-                      
-        train_losses.append(train(model, train_loader, optimizer, criterion, device))
+    return model, criterion, optimizer
+
+
+def main_wandb(model, criterion, optimizer, device, train_loader, validation_loader, test_loader, params, project='PyTorch_Overfits'):
+
+    train_params = params['train_params']
+
+    model_name = dt.datetime.strftime(dt.datetime.now(),"%d_%m__%H_%M")
+
+    best_valid_loss = float('inf')
+
+    with wandb.init(project=project, name=model_name, config=params, entity='nbg'):
         
-        #if epoch+1 % 5:
-        print('Epoch: {}, train_loss:{:.6f}'.format(epoch+1, train_losses[-1]))
-    
-    test_losses.append(test(model, test_loader, criterion, device))
-    print('Test Loss After Training: {:.6f}'.format(test_losses[-1]))
-    
-    #evaluate_classification(model, test_loader) # Print Metrics
-    
-    return train_losses, test_losses
+        wandb.watch(model, log='all')
+        
+        test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)    
+        samples = model.sample()
+        print('\nBefore Training:')
+        print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {:.2f}'.format(test_loss, test_acc, test_dist))    
+        print('\nSample:\n{}\n'.format(samples[0]))    
+        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'test_distance': test_dist, 'samples': samples})
+
+        for epoch in tqdm(range(train_params['N_epochs'])):
+
+            train_loss, train_acc, train_dist = train(model, train_loader, optimizer, criterion, device)
+            val_loss, val_acc, val_dist, val_preds = test(model, validation_loader, criterion, device)
+            
+            # Track model predictions for debugging
+            val_target, val_pred = torch.chunk(val_preds, 2, dim=0) 
+            
+            # Epoch dependent teacher forcing rate
+            if epoch > train_params['N_epochs']//2 and epoch < 3*(train_params['N_epochs']//4):
+                model.update_teacher_forcing_ratio(4*train_params['teacher_forcing_ratio']/train_params['N_epochs'])       
+            
+            wandb.log({'train_loss': train_loss, 'train_accuracy': train_acc, 'train_distance': train_dist,
+                    'validation_loss': val_loss, 'validation_acc': val_acc, 'validation_dist': val_dist,
+                    'validation_targets': val_target, 'validation_preds': val_pred,
+                    'teacher_forcing_ratio': model.teacher_forcing_ratio})
+            
+            if val_loss < best_valid_loss:
+                best_valid_loss = val_loss
+                checkpoint(model_name, model, optimizer, epoch)
+
+            if not (epoch % 25):
+                print('Epoch: {}, train_loss: {:.6f}, train_dist: {:.3f}, val_loss: {:.6f}, val_dist: {:.3f}'.format(epoch,
+                                                                                train_loss, train_dist, val_loss, val_dist))
+                
+            if not (epoch % 50):
+                samples = model.sample()
+                print('Sample:\n{}'.format(samples[0]))
+                wandb.log({'samples': samples})
+                
+        test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)
+        samples = model.sample()
+        print('\nAfter Training:')
+        print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {}'.format(test_loss, test_acc, test_dist))    
+        print('\nSample:\n{}\n'.format(samples[0]))    
+        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'test_distance': test_dist, 'samples': samples})    
 
 
-def calculate_accuracy(target_batch, input_batch):
-    """shapes: (B, T) """
-       
-    accuracies = [accuracy_score(t, i, normalize=True) for t, i in zip(target_batch, input_batch)]   
-    return np.sum(accuracies) / target_batch.shape[0]
+def main_simple(model, criterion, optimizer, device, train_loader, validation_loader, test_loader, params):
+
+    train_params = params['train_params']
+
+    #test_losses, test_accuracies, test_distances = [], [], []
+    #train_losses, train_accuracies, train_distances = [], [], []
+
+    test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)
+    samples = model.sample()
+    print('\nBefore Training:')
+    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {:.2f}'.format(test_loss, test_acc, test_dist)) 
+    print('Initial Sample:\n{}\n'.format(samples[0]))    
+
+    for epoch in range(train_params['N_epochs']):
+        
+        train_loss, train_acc, train_dist = train(model, train_loader, optimizer, criterion, device)
+        val_loss, val_acc, val_dist, val_preds = test(model, validation_loader, criterion, device)
+        
+        if epoch > train_params['N_epochs']//2 and epoch < 3*(train_params['N_epochs']//4):
+            model.update_teacher_forcing_ratio(4*train_params['teacher_forcing_ratio']/train_params['N_epochs'])
+
+        print('Epoch: {}, train_loss: {:.6f}, train_acc: {:.3f}, val_loss: {:.6f}, val_acc: {:.3f}'\
+            .format(epoch, train_loss,train_acc, np.mean(val_loss), np.mean(val_acc)))
+        
+    test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)
+    samples = model.sample()
+    print('\nAfter Training:')
+    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {:.2f}'.format(test_loss, test_acc, test_dist))    
+    print('\nSample:\n{}\n'.format(samples[0]))    
 
 
 def train(model, loader, optimizer, criterion, device):
     """One epoch of training."""
     
     model.train()
-    
-    train_losses, batch_accuracies  = [], []
-    for x in loader:
+
+    grad_dict = {n: {'grads': [], 'ave': [], 'max': [], 'min': []}  for n, p in model.named_parameters() if ((p.requires_grad) and ("bias" not in n))}
+
+    losses, accuracies, distances  = [], [], []
+    for source, target in loader:
         
-        x = x.to(device) # shape: (B, T)
+        # source, target shapes: (B, T+1)
+        source, target = source.to(device), target.to(device)
                 
         optimizer.zero_grad()
-        activations = model(x) #shape: (B, K, T)
+
+        # activations shape: (B, K, T)
+        activations = model(source, target) 
+
+        # SOS token is removed for loss and metric calculations
+        target = target[:, 1:] 
         
-        loss = criterion(activations, x)
+        loss = criterion(activations, target) 
         loss.backward()
+
+        #track_gradients(model, grad_dict)
+        
         optimizer.step()
+        loss.detach()
+        losses.append(loss.item())
         
         y_pred = activations.argmax(1)
-        acc = calculate_accuracy(x.cpu().numpy(), y_pred.cpu().numpy())
-        batch_accuracies.append(acc)
+
+        # Metrics
+        target, y_pred = target.cpu().numpy(), y_pred.cpu().numpy() 
+        accuracies.append(calculate_accuracy(target, y_pred))
+        distances.append(lehvenstein_distance(target, y_pred))
+
+    #print_gradients(grad_dict)
+    #plot_grad_flow(grad_dict)
         
-        loss.detach()
-        train_losses.append(loss.item())        
-        
-    mean_epoch_loss = np.mean(train_losses)
-    mean_epoch_accuracy = np.mean(batch_accuracies)
-        
-    return mean_epoch_loss, mean_epoch_accuracy
+    return np.mean(losses), np.mean(accuracies), np.mean(distances)
 
 def test(model, loader, criterion, device):
     
     model.eval()
     
-    test_losses, batch_accuracies = [], []
-    for x in loader:
+    losses, accuracies, distances = [], [], []
+    for source, target in loader:
         with torch.no_grad():
-                        
-            x = x.to(device)       
-            activations = model(x)
+            
+            # source, target shapes: (B, T+1)
+            source, target = source.to(device), target.to(device)
 
-            loss = criterion(activations, x)
-            test_losses.append(loss.item())
+            # activations shape: (B, K, T)
+            activations = model(source, target)
+
+            # SOS token is removed for loss and metric calculations
+            target = target[:, 1:]  
+
+            loss = criterion(activations, target) 
+            losses.append(loss.item())  
             
             y_pred = activations.argmax(1)
-            acc = calculate_accuracy(x.cpu().numpy(), y_pred.cpu().numpy())
-            batch_accuracies.append(acc)
+
+            visualization = torch.cat([target, y_pred], dim=0)
+
+            # Metrics
+            target, y_pred = target.cpu().numpy(), y_pred.cpu().numpy() 
+            accuracies.append(calculate_accuracy(target, y_pred))
+            distances.append(lehvenstein_distance(target, y_pred))
             
-    mean_test_loss = np.mean(test_losses)
-    mean_test_accuracy = np.mean(batch_accuracies) 
-    
-    return mean_test_loss, mean_test_accuracy
+    return np.mean(losses), np.mean(accuracies), np.mean(distances), visualization
 
 
-def checkpoint(model_name, model, optimizer, validation_acc, epoch):
+def checkpoint(model_name, model, optimizer, epoch):
 
     model_path = os.path.join('model_checkpoints', model_name+'.pt')
 
-    if epoch != 0:
-        old_state = torch.load(model_path)
-        if old_state['validation_acc'] > validation_acc:
-            torch.save({
-                        'epoch': epoch,
-                        'model_state_dict': model.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        'validation_acc': validation_acc
-                        }, model_path)
-    else:
-        torch.save({
-                    'epoch': epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'validation_acc': validation_acc
-                    }, model_path)
+    torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict()
+                }, model_path)
+
+
+def track_gradients(model, grad_dict):
+    for n, p in model.named_parameters():
+        if (p.requires_grad) and ("bias" not in n):
+            grad = p.grad.abs().cpu().numpy()
+            grad_dict[n]['grads'].append(grad)
+            grad_dict[n]['ave'].append(grad.mean())
+            grad_dict[n]['max'].append(grad.max())
+            grad_dict[n]['min'].append(grad.min())
+
+
+def print_gradients(grad_dict):
+    print('\n')
+    for n, dct in grad_dict.items():
+        print('{}'.format(n))
+        print('max: {:.10f}, ave: {:.14f}, min: {:.18f}'.format(np.max(dct['max']), np.mean(dct['ave']), np.min(dct['min'])))
+        grads = list(dct['grads'])
+        unique_grads = np.unique(grads)
+        print('{} | {}'.format(unique_grads[:3], unique_grads[-3:]))
+   
+#def plot_grad_flow(ave_grads, max_grads, layers): #named_parameters
+def plot_grad_flow(grad_dict):
+    '''Plots the gradients flowing through different layers in the net during training.
+    Can be used for checking for possible gradient vanishing / exploding problems.
+    
+    Usage: Plug this function in Trainer class after loss.backwards() as 
+    "plot_grad_flow(self.model.named_parameters())" to visualize the gradient flow'''
+    ave_grads, max_grads, min_grads = [], [], []
+    for layer_dict in grad_dict.values():
+        ave_grads.append(np.mean(layer_dict['ave']))
+        min_grads.append(np.min(layer_dict['min']))
+        max_grads.append(np.max(layer_dict['max']))
+    print(min_grads)
+    fig, ax = plt.subplots(figsize=(10,5))
+    #ax.bar(np.arange(len(max_grads)), max_grads, alpha=0.1, lw=1, color="c")
+    ax.bar(np.arange(len(max_grads)), ave_grads, alpha=0.1, lw=1, color="b", label='mean-gradient')
+    ax.bar(np.arange(len(max_grads)), min_grads, alpha=0.1, lw=3, color="r", label='min-gradient')
+    ax.hlines(0, 0, len(ave_grads)+1, lw=2, color="k" )
+    ax.set_xticks(range(len(ave_grads)))
+    ax.set_xticklabels(list(grad_dict.keys()),rotation="vertical")
+    ax.set_xlim(left=0, right=len(ave_grads))
+    ax.set_ylim(bottom = -0.00001, top=max(ave_grads)) # zoom in on the lower gradient regions
+    ax.set_title("Gradient flow")
+    ax.grid(True)
+    ax.legend(loc=1)
+    plt.show()

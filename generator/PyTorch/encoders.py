@@ -3,6 +3,37 @@ import torch.nn as nn
 
 from models import LSTMnetwork
 
+
+class Encoder(nn.Module):
+    def __init__(self, input_size, embedding_size, hidden_size, n_layers):
+        
+        super().__init__()
+        
+        self.embedding = nn.Embedding(input_size, embedding_size)
+        self.rnn = nn.LSTM(embedding_size, hidden_size, n_layers, batch_first=True)
+        
+        self.init_weights()
+
+    def forward(self, src):        
+        """src: shape (B, T+1)"""
+        
+        # embedded: shape (T+1, B, E)     
+        embedded = self.embedding(src)
+
+        # hidden, cell shapes: (L * D, B, H)
+        _, (hidden, cell) = self.rnn(embedded)
+        
+        return hidden, cell
+
+    def init_weights(self):
+        #nn.init.kaiming_uniform_(self.embed_out, a=math.sqrt(5))
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
+
 class StackedUnidirLSTMEncoder(nn.Module):
     """
     Stacked Unidirectional LSTM Encoder

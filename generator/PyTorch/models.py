@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import random
 
 class LSTMnetwork(nn.Module):
     
@@ -86,6 +86,58 @@ class VanillaAutoEncoder(nn.Module):
 
 
 class Seq2Seq(nn.Module):
+    def __init__(self, encoder, decoder, device, teacher_forcing_ratio):
+        super().__init__()
+        
+        self.encoder = encoder
+        self.decoder = decoder
+        self.device = device
+
+        self.teacher_forcing_ratio=teacher_forcing_ratio
+       
+    def forward(self, source, target):
+        """source, target shapes: (B, T+1) """      
+
+        #last hidden state of the encoder is used as the initial hidden state of the decoder
+        hidden, cell = self.encoder(torch.fliplr(source))
+        
+        #first input to the decoder is the <sos> tokens
+        input = target[:,0]
+      
+        outputs = []
+        for t in range(1, target.shape[1]):
+            
+            output, hidden, cell = self.decoder(input, hidden, cell)
+            
+            outputs.append(output)
+            
+            pred = output.argmax(1)
+                    
+            if random.random() < self.teacher_forcing_ratio:
+                input = target[:,t] # use actual next token as next input
+            else:
+                input = pred
+        
+        return torch.stack(outputs, dim=2) # (B, K, T)
+
+    def sample(self, N=10, T=64):
+        with torch.no_grad():
+            shape = (self.decoder.n_layers, N, self.decoder.hidden_size)
+            hidden, cell = torch.randn(shape, device=self.device), torch.randn(shape, device=self.device)
+            input = torch.zeros(N, dtype=torch.int64,device=self.device)
+            predictions = []
+            for _ in range(T):
+                output, hidden, cell = self.decoder(input, hidden, cell)
+                pred = output.argmax(-1)
+                predictions.append(pred)
+                input=pred
+        return torch.stack(predictions, dim=1)
+
+    def update_teacher_forcing_ratio(self, step_size):
+        self.teacher_forcing_ratio -= step_size
+
+
+class Seq2SeqOuz(nn.Module):
     
     def __init__(self, encoder, decoder):
         
@@ -100,7 +152,6 @@ class Seq2Seq(nn.Module):
         _, hidden_enc = self.encoder(targets)
 
         SOS_vector = targets[:,0] # shape: (B)
-
         # teacher forcing with targets during training
         output_sequence = self.decoder(SOS_vector, hidden_enc, targets) # shape: (B, K, T)
         
@@ -112,6 +163,10 @@ class Seq2Seq(nn.Module):
             hidden = self.decoder.init_hidden_cell_states(random=True)
             samples = self.decoder(x, hidden, None)        
         return samples.argmax(1)
+
+    def init_weights(self):
+        for param in self.parameters():
+            nn.init.normal_(param.data, mean=0, std=0.01)
 
     
 class IOTransformer(nn.Module):    

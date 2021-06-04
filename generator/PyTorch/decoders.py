@@ -3,6 +3,46 @@ import torch.nn as nn
 
 from models import LSTMnetwork
     
+
+class Decoder(nn.Module):
+    def __init__(self, output_size, embedding_size, hidden_size, n_layers):
+        super().__init__()
+        
+        self.output_size = output_size
+        self.hidden_size = hidden_size
+        self.n_layers = n_layers
+        
+        self.embedding = nn.Embedding(output_size, embedding_size)        
+        self.rnn = nn.LSTM(embedding_size, hidden_size, n_layers, batch_first=True)        
+        self.fc_out = nn.Linear(hidden_size, output_size)
+
+        self.init_weights()        
+        
+    def forward(self, input, hidden, cell):
+        """hidden = [n layers * n directions, batch size, hid dim]
+        cell = [n layers * n directions, batch size, hid dim]      
+        input = [batch size] # should be a single time step"""      
+             
+        input = input.unsqueeze(1) # (B, 1)
+
+        # embedded shape: (B, 1, E)       
+        embedded = self.embedding(input)
+
+        # output shape: (B, 1, H)
+        output, (hidden, cell) = self.rnn(embedded, (hidden, cell))
+        
+        # prediction shape: (B, O)
+        prediction = self.fc_out(output.squeeze(1))
+
+        return prediction, hidden, cell
+    
+    def init_weights(self):
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
 class StackedUnidirLSTMDecoder(nn.Module):
     
     def __init__(self,
@@ -59,7 +99,6 @@ class StackedUnidirLSTMDecoder(nn.Module):
             self.teacher_forcing_ratio -= step_size*(epoch/total_epochs)
         
 
-    
 class StackedUnidirLSTMDenseDecoder(nn.Module):
     """
     Stacked Unidirectional LSTM followed by a Dense Layer
@@ -130,15 +169,15 @@ class Seq2SeqDecoder(nn.Module):
         targets (tensor shape: (Batch, Time)): bassline sequence for teacher forcing. 
         """
                         
-        y = y0 # first input is the SOS token, shape: (Batch)
+        y = y0 # first input should be the SOS token, shape: (Batch)
         hidden = hidden_enc # first decoder hidden state is the last hidden state of the encoder
 
         z = hidden_enc[0].squeeze(dim=0) # latent is the last hidden state of the encoder
 
         outputs = []
         if targets is None:
-
-            for i in range(self.sequence_length): # for each time step
+            
+            for _ in range(1, self.sequence_length): # for each time step (seq_len-1)
 
                 y_embed = self.embedding(y) # (B, E)
 
@@ -154,10 +193,8 @@ class Seq2SeqDecoder(nn.Module):
                 y = y.argmax(-1) # most probable token for next step 
         else:
 
-            for i in range(self.sequence_length): # for each time step           
-
-                if self.teacher_forcing_ratio > torch.rand(1):                                   
-                    y = targets[:,i] # (Batch)
+            y = targets[:,0] # shape: (Batch)
+            for i in range(1, self.sequence_length): # for each time step           
 
                 y_embed = self.embedding(y) # (B, E)
 
@@ -171,6 +208,9 @@ class Seq2SeqDecoder(nn.Module):
                 outputs.append(y) # record the output tensor for loss calculation  
                 
                 y = y.argmax(-1) # most probable token for next step 
+
+                if self.teacher_forcing_ratio > torch.rand(1):                                 
+                    y = targets[:,i] # (Batch)
         
         return torch.stack(outputs, dim=2) # (B, K, T)
                         
@@ -185,7 +225,7 @@ class StackedUnidirLSTMDecoderwithEmbedding(nn.Module):
     
     def __init__(self,
                 num_embeddings, # K by definition (for sampling procedure)
-                embedding_dim, # input to the LSTMnetwork
+                embedding_size, # input to the LSTMnetwork
                 hidden_size, # hidden size of the LSTMnetwork
                 num_layers,
                 dropout,
@@ -201,10 +241,10 @@ class StackedUnidirLSTMDecoderwithEmbedding(nn.Module):
         self.batch_size = batch_size
        
         # Embed the inputs
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+        self.embedding = nn.Embedding(num_embeddings, embedding_size)
 
         # decoder outputs are fed as inputs
-        self.rnn = LSTMnetwork(embedding_dim, hidden_size, 1, num_layers, dropout, batch_size, device)
+        self.rnn = LSTMnetwork(embedding_size, hidden_size, 1, num_layers, dropout, batch_size, device)
 
         self.dense = nn.Linear(hidden_size, num_embeddings)
                 

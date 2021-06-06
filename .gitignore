@@ -11,3 +11,8 @@ jupyter_submit.sh
 */__pycache__/*
 */generations/*
 .vscode/*
+*.pt
+__pycache__/
+wandb/
+*/model_checkpoints/*
+*.jpg

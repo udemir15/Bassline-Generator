@@ -1,7 +1,7 @@
 from tensorflow.keras import Model
 from tensorflow.keras import layers
-from models.ae.encoders import *
-from models.ae.decoders import *
+from keras_models.ae.encoders import *
+from keras_models.ae.decoders import *
 from sklearn.mixture import GaussianMixture
 
 

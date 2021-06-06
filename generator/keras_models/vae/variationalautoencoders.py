@@ -6,8 +6,8 @@ from tensorflow.keras import models
 from tensorflow.keras import layers
 from tensorflow.keras.metrics import Mean
 from tensorflow.keras.losses import sparse_categorical_crossentropy
-from models.vae.encoders import *
-from models.vae.decoders import *
+from keras_models.vae.encoders import *
+from keras_models.vae.decoders import *
 
 
 class VAE(models.Model):

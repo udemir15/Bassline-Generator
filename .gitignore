@@ -8,6 +8,9 @@ jupyter_submit.sh
 */Datasets/*
 */figures/*
 */wandb/*
+*/__pycache__/*
+*/generations/*
+.vscode/*
 *.pt
 __pycache__/
 wandb/

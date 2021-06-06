@@ -9,7 +9,6 @@ import torch.nn as nn
 
 from tqdm import tqdm
 
-import models, encoders, decoders
 from metrics import calculate_accuracy, lehvenstein_distance
 
 WANDB_API_KEY= '52c84ab3f3b5c1f999c7f5f389f5e423f46fc04a'
@@ -46,7 +45,7 @@ def main_wandb(model, criterion, optimizer, device, train_loader, validation_loa
             val_target, val_pred = torch.chunk(val_preds, 2, dim=0) 
             
             # Epoch dependent teacher forcing rate
-            if epoch > N_epochs//2 and epoch < 3*(N_epochs//4):
+            if epoch > int(N_epochs/2) and epoch < 3*int(N_epochs/4):
                 tf_ratio -= 4*tf_ratio/N_epochs
             
             wandb.log({'train_loss': train_loss, 'train_accuracy': train_acc,

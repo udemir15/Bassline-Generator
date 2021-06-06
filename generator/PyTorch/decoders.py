@@ -100,6 +100,7 @@ class GRUDecoderWithAttention(nn.Module):
 
         self.init_weights()        
         
+        
     def forward(self, target, hidden, teacher_forcing_ratio):
         """
         Parameters:
@@ -125,8 +126,8 @@ class GRUDecoderWithAttention(nn.Module):
             # Look at the decoder output history
             output_history = torch.cat(outputs, dim=1) # (B, T, O)
 
-            # w: (B, 1, O), a: (B, T) 
             w, a = self.attention(hidden, output_history)
+            # w: (B, 1, O), a: (B, T) 
 
             attentions.append(a)
 
@@ -143,7 +144,7 @@ class GRUDecoderWithAttention(nn.Module):
 
             pred = output.argmax(1) # pred shape: (B)
 
-            outputs.append(output.unsqueeze(1))
+            outputs.append(output.unsqueeze(1)) # for (B, T, E)
 
             if random.random() < teacher_forcing_ratio:
                 input = target[:,t] # use actual next token as next input

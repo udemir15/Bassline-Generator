@@ -1,10 +1,8 @@
 import torch
 import torch.nn as nn
 
-from models import LSTMnetwork
 
-
-class Encoder(nn.Module):
+class LSTMEncoder(nn.Module):
     def __init__(self, input_size, embedding_size, hidden_size, n_layers):
         
         super().__init__()
@@ -34,98 +32,70 @@ class Encoder(nn.Module):
                 nn.init.xavier_uniform_(param)
 
 
-class StackedUnidirLSTMEncoder(nn.Module):
-    """
-    Stacked Unidirectional LSTM Encoder
-    """
-    
-    def __init__(self,
-                input_size, #embedding_dim
-                hidden_size,
-                num_layers,
-                dropout,
-                batch_size,
-                device):
+class GRUEncoder(nn.Module):
+    def __init__(self, input_size, embedding_size, hidden_size, n_layers):
         
         super().__init__()
         
-        self.net = LSTMnetwork(input_size, hidden_size, 1, num_layers, dropout, batch_size, device).to(device)
+        self.embedding = nn.Embedding(input_size, embedding_size)
+        self.rnn = nn.GRU(embedding_size, hidden_size, n_layers, batch_first=True)
         
-    def forward(self, x):             
-        """Takes embedded inputs x: shape (Batch, Time, Embed)"""
+        self.init_weights()
+
+    def forward(self, src):        
+        """src: shape (B, T+1)"""
         
-        y, (h, c) = self.net(x)
-            
-        return y[:,-1,:], (h, c)
-    
-    
-class StackedBidirLSTMEncoder(nn.Module):
-    
-    def __init__(self,
-                 input_size,
-                hidden_size,
-                num_layers,
-                dropout,
-                batch_size,
-                device):
+        embedded = self.embedding(src) # (B, T+1, E)
+
+        # hidden shape: (L*D, B, H)
+        _, hidden = self.rnn(embedded)
+        
+        return hidden
+
+    def init_weights(self):
+        #nn.init.kaiming_uniform_(self.embed_out, a=math.sqrt(5))
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
+
+class BidirectionalGRUEncoder(nn.Module):
+    def __init__(self, input_size, embedding_size, hidden_size, output_size):
         
         super().__init__()
         
-        self.num_layers = num_layers
-        self.batch_size = batch_size
-        self.hidden_size = hidden_size
-        
-        self.net = LSTMnetwork(input_size, hidden_size, 2, num_layers, dropout, batch_size, device).to(device)
-        
-    def forward(self, x):
-        """Takes embedded inputs x: shape (Batch, Time, Embed)"""
-        
-        y, (h, c) = self.net(x)
-        
-        # reshape to (Batch, Seq, Directions, Hidden) and sum both directions
-        y = torch.sum(y.reshape(self.batch_size, -1, 2, self.hidden_size), dim=2)
-        
-        # reshape to (Layers, Directions, Batch, Hidden) and sum both directions
-        h = torch.sum(h.reshape(self.num_layers, 2, self.batch_size, self.hidden_size), dim=1)
-        c = torch.sum(c.reshape(self.num_layers, 2, self.batch_size, self.hidden_size), dim=1)
-                
-        # return last time step of the output
-        return y[:,-1,:], (h, c)
+        self.embedding = nn.Embedding(input_size, embedding_size)
+        self.rnn = nn.GRU(embedding_size, hidden_size, 1, batch_first=True, bidirectional=True)
+        self.fc = nn.Linear(hidden_size*2, output_size)
 
+        self.init_weights()
 
-class Seq2SeqEncoder(nn.Module):
-    
-    def __init__(self,
-                num_embeddings, # number of embeddings
-                embedding_size,                
-                hidden_size,
-                num_layers,
-                dropout,
-                batch_size,
-                device):
+    def forward(self, src):        
+        """ src: shape (B, T+1)
+            outputs: shape (B, T+1, H*D)
+            hidden: shape (B, O)
+        """
         
-        super().__init__()
-        
-        self.num_layers = num_layers
-        self.batch_size = batch_size
-        self.hidden_size = hidden_size
-        
-        self.embedding = nn.Embedding(num_embeddings, embedding_size)
-        self.net = LSTMnetwork(embedding_size, hidden_size, 2, num_layers, dropout, batch_size, device).to(device)
-        
-    def forward(self, x):
-        """Takes class labels x: shape (Batch, Time)"""
+        embedded = self.embedding(src) # (B, T+1, E)
 
-        x = self.embedding(x) # shape: (B, T, E)
-        
-        y, (h, c) = self.net(x)
-        
-        # reshape to (Batch, Seq, Directions, Hidden) and sum both directions
-        y = torch.sum(y.reshape(self.batch_size, -1, 2, self.hidden_size), dim=2)
-        
-        # reshape to (Layers, Directions, Batch, Hidden) and sum both directions
-        h = torch.sum(h.reshape(self.num_layers, 2, self.batch_size, self.hidden_size), dim=1)
-        c = torch.sum(c.reshape(self.num_layers, 2, self.batch_size, self.hidden_size), dim=1)
-                
-        # return last time step of the output
-        return y[:,-1,:], (h, c)
+        # hidden, shape: (L*D, B, H)
+        # outputs shape: (B, T+1, H*2)
+        outputs, hidden = self.rnn(embedded)
+
+        #final_hidden_forward = hidden[-2, :, :]
+        #final_hidden_backward = hidden[-1, :, :]
+        cat_hiddens = torch.cat((hidden[-2,:,:], hidden[-1,:,:]), dim = 1) # (B, 2*H)
+
+        hidden = torch.tanh(self.fc(cat_hiddens)) # (B, O)
+
+        return outputs, hidden
+
+    def init_weights(self):
+        #nn.init.kaiming_uniform_(self.embed_out, a=math.sqrt(5))
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)

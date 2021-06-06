@@ -16,25 +16,11 @@ WANDB_API_KEY= '52c84ab3f3b5c1f999c7f5f389f5e423f46fc04a'
 import wandb
 wandb.login()
 
-def make(encoder_params, decoder_params, device, criterion_weights=None):
 
-    encoder = encoders.Seq2SeqEncoder(**encoder_params).to(device)
-    decoder = decoders.Seq2SeqDecoder(**decoder_params).to(device)
-    model = models.Seq2Seq(encoder, decoder).to(device)
-    model.init_weights()
+def main_wandb(model, criterion, optimizer, device, train_loader, validation_loader, test_loader, params, project):
 
-    print(model)
-    print('Number of parameters: {}'.format(sum([parameter.numel() for parameter in model.parameters()])))
-
-    criterion = nn.CrossEntropyLoss(reduction='mean', weight=criterion_weights)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    
-    return model, criterion, optimizer
-
-
-def main_wandb(model, criterion, optimizer, device, train_loader, validation_loader, test_loader, params, project='PyTorch_Overfits'):
-
-    train_params = params['train_params']
+    N_epochs = params['training']['N_epochs']
+    tf_ratio = params['training']['teacher_forcing_ratio']
 
     model_name = dt.datetime.strftime(dt.datetime.now(),"%d_%m__%H_%M")
 
@@ -44,90 +30,88 @@ def main_wandb(model, criterion, optimizer, device, train_loader, validation_loa
         
         wandb.watch(model, log='all')
         
-        test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)    
+        test_loss, test_acc, _ = test(model, test_loader, criterion, device)    
         samples = model.sample()
         print('\nBefore Training:')
-        print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {:.2f}'.format(test_loss, test_acc, test_dist))    
+        print('Test Loss: {:.4f}, Test Accuracy: {:.4f}'.format(test_loss, test_acc))    
         print('\nSample:\n{}\n'.format(samples[0]))    
-        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'test_distance': test_dist, 'samples': samples})
+        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'samples': samples})
 
-        for epoch in tqdm(range(train_params['N_epochs'])):
+        for epoch in tqdm(range(N_epochs)):
 
-            train_loss, train_acc, train_dist = train(model, train_loader, optimizer, criterion, device)
-            val_loss, val_acc, val_dist, val_preds = test(model, validation_loader, criterion, device)
+            train_loss, train_acc = train(model, train_loader, optimizer, criterion, device, tf_ratio)
+            val_loss, val_acc, val_preds = test(model, validation_loader, criterion, device)
             
             # Track model predictions for debugging
             val_target, val_pred = torch.chunk(val_preds, 2, dim=0) 
             
             # Epoch dependent teacher forcing rate
-            if epoch > train_params['N_epochs']//2 and epoch < 3*(train_params['N_epochs']//4):
-                model.update_teacher_forcing_ratio(4*train_params['teacher_forcing_ratio']/train_params['N_epochs'])       
+            if epoch > N_epochs//2 and epoch < 3*(N_epochs//4):
+                tf_ratio -= 4*tf_ratio/N_epochs
             
-            wandb.log({'train_loss': train_loss, 'train_accuracy': train_acc, 'train_distance': train_dist,
-                    'validation_loss': val_loss, 'validation_acc': val_acc, 'validation_dist': val_dist,
+            wandb.log({'train_loss': train_loss, 'train_accuracy': train_acc,
+                    'validation_loss': val_loss, 'validation_acc': val_acc,
                     'validation_targets': val_target, 'validation_preds': val_pred,
-                    'teacher_forcing_ratio': model.teacher_forcing_ratio})
+                    'teacher_forcing_ratio': tf_ratio})
             
             if val_loss < best_valid_loss:
                 best_valid_loss = val_loss
                 checkpoint(model_name, model, optimizer, epoch)
 
             if not (epoch % 25):
-                print('Epoch: {}, train_loss: {:.6f}, train_dist: {:.3f}, val_loss: {:.6f}, val_dist: {:.3f}'.format(epoch,
-                                                                                train_loss, train_dist, val_loss, val_dist))
+                print('Epoch: {}, train_loss: {:.6f}, val_loss: {:.6f}'.format(epoch, train_loss, val_loss))
                 
             if not (epoch % 50):
                 samples = model.sample()
                 print('Sample:\n{}'.format(samples[0]))
                 wandb.log({'samples': samples})
                 
-        test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)
+        test_loss, test_acc, _ = test(model, test_loader, criterion, device)
         samples = model.sample()
         print('\nAfter Training:')
-        print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {}'.format(test_loss, test_acc, test_dist))    
+        print('Test Loss: {:.4f}, Test Accuracy: {:.4f} {}'.format(test_loss, test_acc))    
         print('\nSample:\n{}\n'.format(samples[0]))    
-        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'test_distance': test_dist, 'samples': samples})    
+        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'samples': samples})    
 
 
 def main_simple(model, criterion, optimizer, device, train_loader, validation_loader, test_loader, params):
 
-    train_params = params['train_params']
+    N_epochs = params['training']['N_epochs']
+    tf_ratio = params['training']['teacher_forcing_ratio']
 
     #test_losses, test_accuracies, test_distances = [], [], []
     #train_losses, train_accuracies, train_distances = [], [], []
 
-    test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)
+    test_loss, test_acc, _ = test(model, test_loader, criterion, device)
     samples = model.sample()
     print('\nBefore Training:')
-    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {:.2f}'.format(test_loss, test_acc, test_dist)) 
+    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}'.format(test_loss, test_acc)) 
     print('Initial Sample:\n{}\n'.format(samples[0]))    
 
-    for epoch in range(train_params['N_epochs']):
+    for epoch in range(N_epochs):
         
-        train_loss, train_acc, train_dist = train(model, train_loader, optimizer, criterion, device)
-        val_loss, val_acc, val_dist, val_preds = test(model, validation_loader, criterion, device)
+        train_loss, train_acc = train(model, train_loader, optimizer, criterion, device, tf_ratio)
+        val_loss, val_acc, val_preds = test(model, validation_loader, criterion, device)
         
-        if epoch > train_params['N_epochs']//2 and epoch < 3*(train_params['N_epochs']//4):
-            model.update_teacher_forcing_ratio(4*train_params['teacher_forcing_ratio']/train_params['N_epochs'])
+        if epoch > N_epochs//2 and epoch < 3*(N_epochs):
+            tf_ratio -= 4*tf_ratio/N_epochs
 
         print('Epoch: {}, train_loss: {:.6f}, train_acc: {:.3f}, val_loss: {:.6f}, val_acc: {:.3f}'\
             .format(epoch, train_loss,train_acc, np.mean(val_loss), np.mean(val_acc)))
         
-    test_loss, test_acc, test_dist, _ = test(model, test_loader, criterion, device)
+    test_loss, test_acc,  _ = test(model, test_loader, criterion, device)
     samples = model.sample()
     print('\nAfter Training:')
-    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}, Test Distance: {:.2f}'.format(test_loss, test_acc, test_dist))    
+    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}'.format(test_loss, test_acc))    
     print('\nSample:\n{}\n'.format(samples[0]))    
 
 
-def train(model, loader, optimizer, criterion, device):
+def train(model, loader, optimizer, criterion, device, tf_ratio):
     """One epoch of training."""
     
     model.train()
 
-    grad_dict = {n: {'grads': [], 'ave': [], 'max': [], 'min': []}  for n, p in model.named_parameters() if ((p.requires_grad) and ("bias" not in n))}
-
-    losses, accuracies, distances  = [], [], []
+    losses, accuracies  = [], []
     for source, target in loader:
         
         # source, target shapes: (B, T+1)
@@ -136,15 +120,13 @@ def train(model, loader, optimizer, criterion, device):
         optimizer.zero_grad()
 
         # activations shape: (B, K, T)
-        activations = model(source, target) 
+        activations = model(source, target, tf_ratio) 
 
         # SOS token is removed for loss and metric calculations
         target = target[:, 1:] 
         
         loss = criterion(activations, target) 
         loss.backward()
-
-        #track_gradients(model, grad_dict)
         
         optimizer.step()
         loss.detach()
@@ -155,18 +137,15 @@ def train(model, loader, optimizer, criterion, device):
         # Metrics
         target, y_pred = target.cpu().numpy(), y_pred.cpu().numpy() 
         accuracies.append(calculate_accuracy(target, y_pred))
-        distances.append(lehvenstein_distance(target, y_pred))
-
-    #print_gradients(grad_dict)
-    #plot_grad_flow(grad_dict)
+        #distances.append(lehvenstein_distance(target, y_pred))
         
-    return np.mean(losses), np.mean(accuracies), np.mean(distances)
+    return np.mean(losses), np.mean(accuracies) #, np.mean(distances)
 
 def test(model, loader, criterion, device):
     
     model.eval()
     
-    losses, accuracies, distances = [], [], []
+    losses, accuracies,  = [], []
     for source, target in loader:
         with torch.no_grad():
             
@@ -174,7 +153,7 @@ def test(model, loader, criterion, device):
             source, target = source.to(device), target.to(device)
 
             # activations shape: (B, K, T)
-            activations = model(source, target)
+            activations = model(source, target, 0.0) # turn off the teacher forcing ratio
 
             # SOS token is removed for loss and metric calculations
             target = target[:, 1:]  
@@ -184,14 +163,15 @@ def test(model, loader, criterion, device):
             
             y_pred = activations.argmax(1)
 
+            # return the target and the predictions for debugging
             visualization = torch.cat([target, y_pred], dim=0)
 
             # Metrics
             target, y_pred = target.cpu().numpy(), y_pred.cpu().numpy() 
             accuracies.append(calculate_accuracy(target, y_pred))
-            distances.append(lehvenstein_distance(target, y_pred))
+            #distances.append(lehvenstein_distance(target, y_pred))
             
-    return np.mean(losses), np.mean(accuracies), np.mean(distances), visualization
+    return np.mean(losses), np.mean(accuracies),  visualization
 
 
 def checkpoint(model_name, model, optimizer, epoch):
@@ -204,6 +184,11 @@ def checkpoint(model_name, model, optimizer, epoch):
                 'optimizer_state_dict': optimizer.state_dict()
                 }, model_path)
 
+
+#grad_dict = {n: {'grads': [], 'ave': [], 'max': [], 'min': []}  for n, p in model.named_parameters() if ((p.requires_grad) and ("bias" not in n))}
+#print_gradients(grad_dict)
+#plot_grad_flow(grad_dict)
+#track_gradients(model, grad_dict)
 
 def track_gradients(model, grad_dict):
     for n, p in model.named_parameters():

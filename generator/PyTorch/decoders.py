@@ -1,14 +1,239 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from models import LSTMnetwork
+import random
+
+
+class GRUDecoder(nn.Module):
+    def __init__(self, output_size, embedding_size, hidden_size):
+        """Since this is an AutoEncoder Seq2Seq hybrid, the input size is the output size."""
+
+        super().__init__()
+        
+        self.hidden_size = hidden_size
+        self.n_layers = 1
+        
+        self.embedding = nn.Embedding(output_size, embedding_size)        
+        self.rnn = nn.GRU(embedding_size+hidden_size, hidden_size, 1, batch_first=True)        
+        self.fc_out = nn.Linear(embedding_size + 2*hidden_size, output_size)
+
+        self.init_weights()        
+        
+    def forward(self, target, hidden, context, teacher_forcing_ratio):
+        """
+        Parameters:
+        -----------
+            target: (B, T+1)
+            hidden: (L*D, B, H)
+            context: (L*D, B, H) 
+
+        Returns:
+        --------
+            outputs: (B, K, T)
+        """
+
+        input = target[:,0] # (B)
+
+        context = context.permute(1,0,2) # (B, L*D, H) 
+
+        outputs = []
+        for t in range(1, target.shape[1]):
+
+            input = input.unsqueeze(1) # (B, 1)
+
+            # embedded shape: (B, 1, E)       
+            embedded = self.embedding(input)
+
+            rnn_input = torch.cat((embedded, context), dim=2)
+
+            # output shape: (B, 1, H)
+            # hidden shape: (L*D, B, H)
+            output, hidden = self.rnn(rnn_input, hidden)
+
+            # output shape: (B, E+2*H)
+            output = torch.cat((embedded, hidden.permute(1,0,2), context), dim=2).squeeze(1)
+        
+            # output shape: (B, Out)
+            output = self.fc_out(output)
+
+            pred = output.argmax(1) # pred shape: (B)
+
+            outputs.append(output)
+
+            if random.random() < teacher_forcing_ratio:
+                input = target[:,t] # use actual next token as next input
+            else:
+                input = pred
+
+        outputs = torch.stack(outputs, dim=2) # (B, K, T)
+
+        return outputs
     
+    def init_weights(self):
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
 
-class Decoder(nn.Module):
+    def init_hidden(self, batch_size):
+        shape = (self.n_layers, batch_size, self.hidden_size)
+        return torch.randn(shape).cuda()
+
+
+class GRUDecoderWithAttention(nn.Module):
+    def __init__(self, output_size, embedding_size, hidden_size):
+        """Since this is an AutoEncoder Seq2Seq hybrid, the input size is the output size."""
+
+        super().__init__()
+
+        self.output_size = output_size
+
+        #self.attention = Attention(encoder_hidden_size, hidden_size)    
+        self.attention = Attention(output_size, hidden_size)    
+        
+        self.embedding = nn.Embedding(output_size, embedding_size)        
+        
+        #self.rnn = nn.GRU(embedding_size+2*encoder_hidden_size, hidden_size, 1, batch_first=True)        
+        self.rnn = nn.GRU(embedding_size+output_size, hidden_size, 1, batch_first=True)  
+        
+        #self.fc_out = nn.Linear(embedding_size+2*encoder_hidden_size+hidden_size, output_size)
+        self.fc_out = nn.Linear(embedding_size+output_size+hidden_size, output_size)
+
+        self.init_weights()        
+        
+    def forward(self, target, hidden, teacher_forcing_ratio):
+    #def forward(self, target, hidden, encoder_outputs, teacher_forcing_ratio):
+        """
+        Parameters:
+        -----------
+            target: (B, T+1)
+            hidden: previous decoder hidden (B, H_dec)
+            encoder_outputs: (B, T+1, 2*H_enc) 
+
+        Returns:
+        --------
+            outputs: (B, E, T)
+        """
+
+        input = target[:,0] # (B)
+
+        #outputs, attentions = [], [] hidden.unsqueeze(2)
+        
+        outputs, attentions = [torch.zeros((target.shape[0], self.output_size,1)).cuda()], [] 
+        for t in range(1, target.shape[1]):
+
+            input = input.unsqueeze(1) # (B, 1)
+       
+            embedded = self.embedding(input) # (B, 1, E)
+
+            # Look at the decoder output history
+            #output_history = torch.stack(outputs, dim=2) # (B, E, T)
+            output_history = torch.cat(outputs, dim=2)
+
+            #print('out hs {}'.format(output_history.shape))
+
+            a = self.attention(hidden, output_history).unsqueeze(1) # (B, 1, T)
+            #a = self.attention(hidden, encoder_outputs).unsqueeze(1) # (B, 1, T+1)
+
+            attentions.append(a)
+
+            #print(a.shape, output_history.shape)
+
+            #w =  torch.bmm(a, encoder_outputs) # (B, 1, 2*H_enc)
+            w =  torch.bmm(a, output_history.permute(0,2,1)) # (B, O,  1)
+
+            #print(embedded.shape, w.shape)
+
+            rnn_input = torch.cat((embedded, w), dim=2) # (B, 1, birşey)
+
+            output, hidden = self.rnn(rnn_input, hidden.unsqueeze(0))
+            # output: (B, 1, H_dec)
+            # hidden: (1, B, H_dec)
+
+            assert (output.permute(1,0,2) == hidden).all()
+
+            hidden = hidden.squeeze(0) # (B, H_dec)
+
+            #print(output.shape, w.shape, embedded.shape)
+
+            output = self.fc_out(torch.cat((output, w, embedded), dim=2).squeeze(1)) # (B, E)
+
+            #print('output {}'.format(output.shape))
+
+            pred = output.argmax(1) # pred shape: (B)
+
+            #print('pred {}'.format(pred.shape))
+
+            outputs.append(output.unsqueeze(2))
+
+            if random.random() < teacher_forcing_ratio:
+                input = target[:,t] # use actual next token as next input
+            else:
+                input = pred
+
+        #outputs = torch.stack(outputs, dim=2) # (B, E, T)
+        outputs = torch.stack(outputs[1:], dim=2).squeeze(3) # (B, E, T)
+
+        #print(outputs.shape)
+
+        attentions = torch.cat(attentions, dim=2) # (B, T, T+1)
+
+        return outputs, attentions
+    
+    def init_weights(self):
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
+    def init_hidden(self, batch_size):
+        shape = (self.n_layers, batch_size, self.hidden_size)
+        return torch.randn(shape).cuda()
+
+
+class Attention(nn.Module):
+    #def __init__(self, enc_hid_dim, dec_hid_dim):
+    def __init__(self, output_dim, dec_hid_dim):
+        super().__init__()
+        
+        self.attn = nn.Linear((dec_hid_dim+output_dim), dec_hid_dim)
+
+        self.v = nn.Linear(dec_hid_dim, 1, bias=False)
+        
+    #def forward(self, hidden, encoder_outputs):
+    def forward(self, hidden, output_history):
+        """
+        hidden = (B, dec_H) prev dec hidden state
+        encoder_outputs = (B, T+1, enc_H*2)"""
+        
+        
+        #encoder_outputs = encoder_outputs.permute(0,2,1)# B T E 
+        output_history = output_history.permute(0,2,1)# B T E 
+
+        src_len = output_history.shape[1]
+
+        hidden = hidden.unsqueeze(1).repeat(1, src_len, 1) # (B, T+1, dec_H) 
+
+        catted = torch.cat((hidden, output_history), dim = 2)
+        attt = self.attn(catted) 
+        
+        # cat shape: (B, T+1, dec_H + 2*enc_H)
+        #attt = self.attn(torch.cat((hidden, encoder_outputs), dim = 2)) # (B, T+1, dec_H)
+        
+        energy = torch.tanh(attt) # (B, T+1, dec_H)
+
+        attention = self.v(energy).squeeze(2) # (B, T+1)
+        
+        return F.softmax(attention, dim=1) # (B, T+1)
+
+
+class SimpleLSTMDecoder(nn.Module):
     def __init__(self, output_size, embedding_size, hidden_size, n_layers):
         super().__init__()
         
-        self.output_size = output_size
         self.hidden_size = hidden_size
         self.n_layers = n_layers
         
@@ -18,23 +243,45 @@ class Decoder(nn.Module):
 
         self.init_weights()        
         
-    def forward(self, input, hidden, cell):
-        """hidden = [n layers * n directions, batch size, hid dim]
-        cell = [n layers * n directions, batch size, hid dim]      
-        input = [batch size] # should be a single time step"""      
-             
-        input = input.unsqueeze(1) # (B, 1)
+    def forward(self, target, hidden, cell, teacher_forcing_ratio):
+        """
+        Parameters:
+        -----------
+            target: (B, T+1)
+            hidden, cell: (L, B, H) 
 
-        # embedded shape: (B, 1, E)       
-        embedded = self.embedding(input)
+        Returns:
+        --------
+            outputs: (B, K, T)
+        """
 
-        # output shape: (B, 1, H)
-        output, (hidden, cell) = self.rnn(embedded, (hidden, cell))
+        input = target[:,0] # (B)
+
+        outputs = []
+        for t in range(1, target.shape[1]):
+
+            input = input.unsqueeze(1) # (B,1)
+
+            # embedded shape: (B, 1, E)       
+            embedded = self.embedding(input)
+
+            # output shape: (B, 1, H)
+            output, (hidden, cell) = self.rnn(embedded, (hidden, cell))
         
-        # prediction shape: (B, O)
-        prediction = self.fc_out(output.squeeze(1))
+            # output shape: (B, Out)
+            output = self.fc_out(output.squeeze(1))
 
-        return prediction, hidden, cell
+            outputs.append(output)
+
+            pred = output.argmax(1)
+
+            if random.random() < teacher_forcing_ratio:
+                input = target[:,t] # use actual next token as next input
+            else:
+                input = pred
+
+        outputs = torch.stack(outputs, dim=2) # (B, K, T)
+        return outputs
     
     def init_weights(self):
         for name, param in self.named_parameters():
@@ -43,229 +290,71 @@ class Decoder(nn.Module):
             elif 'weight' in name:
                 nn.init.xavier_uniform_(param)
 
-class StackedUnidirLSTMDecoder(nn.Module):
-    
-    def __init__(self,
-                input_size,
-                num_layers,
-                dropout,
-                batch_size,
-                sequence_length,
-                device,
-                teacher_forcing_ratio=0.0):
-        
+    def init_hidden_cell(self, batch_size):
+        shape = (self.n_layers, batch_size, self.hidden_size)
+        return torch.randn(shape).cuda(), torch.randn(shape).cuda()
+
+
+class SimpleGRUDecoder(nn.Module):
+    def __init__(self, output_size, embedding_size, hidden_size, n_layers):
         super().__init__()
         
-        self.sequence_length = sequence_length
-        self.teacher_forcing_ratio=teacher_forcing_ratio
-        
-        self.rnn = LSTMnetwork(input_size, input_size, 1, num_layers, dropout, batch_size, device)
-                
-    def forward(self, y, hidden, targets=None):
-        """
-        y (tensor): (batch, feat)
-        hidden (tensor): 
-        targets (tensor, default=None): embedded bassline sequence for teacher forcing. shape: (Batch, Time, Embed)
-        """
-                
-        y = y.unsqueeze(dim=1) # (Batch, 1, feat)       
-        
-        outputs = []        
-        if targets is None:
-                    
-            for _ in range(self.sequence_length): # for each time step
-                y, hidden = self.rnn(y, hidden)        
-                outputs.append(y) # record the output  
-                
-        else: # Teacher Forcing
-    
-            for i in range(self.sequence_length): # for each time step
-                
-                if self.teacher_forcing_ratio > torch.rand(1):
-
-                    # targets: shape (Batch, Time, Embed) 
-                    y = targets[:,i,:].unsqueeze(dim=1) 
-                    
-                y, hidden = self.rnn(y, hidden)        
-                outputs.append(y) # record the output
-                
-        return torch.cat(outputs, dim=1)
-                        
-    def init_hidden_cell_states(self, random=False):
-        return self.rnn.init_hidden_cell_states(random)
-    
-    def update_teacher_forcing_ratio(self, step_size, epoch, total_epochs):        
-        if self.teacher_forcing_ratio:
-            self.teacher_forcing_ratio -= step_size*(epoch/total_epochs)
-        
-
-class StackedUnidirLSTMDenseDecoder(nn.Module):
-    """
-    Stacked Unidirectional LSTM followed by a Dense Layer
-    """
-    
-    def __init__(self,
-                input_size,
-                output_size,
-                num_layers,
-                dropout,
-                batch_size,
-                sequence_length,
-                device,
-                teacher_forcing_ratio=0.0):
-        
-        super().__init__()
-        
-        self.batch_size = batch_size
-        self.input_size = input_size
-        self.teacher_forcing_ratio = teacher_forcing_ratio
-        
-        self.rnn =  StackedUnidirLSTMDecoder(input_size, num_layers, dropout, batch_size, sequence_length, device, teacher_forcing_ratio)
-        
-        # ACTIVATION ?????????????*******************
-        self.dense = nn.Linear(input_size, output_size)
-        
-    def forward(self, x, hidden, targets=None):        
-        y = self.rnn(x, hidden, targets)
-        output = self.dense(y)        
-        return output
-    
-    def init_hidden_cell_states(self, random=False):
-        return self.rnn.init_hidden_cell_states(random)
-    
-    def update_teacher_forcing_ratio(self, step_size, epoch, total_epochs):        
-        self.rnn.update_teacher_forcing_ratio(step_size, epoch, total_epochs)
-        self.teacher_forcing_ratio = self.rnn.teacher_forcing_ratio        
-
-
-class Seq2SeqDecoder(nn.Module):
-    
-    def __init__(self,
-                num_embeddings, # number of embeddings
-                embedding_size,
-                hidden_size, # must be equal to hidden_enc
-                num_layers,
-                dropout,
-                batch_size,
-                sequence_length,
-                device,
-                teacher_forcing_ratio=0.0):
-        
-        super().__init__()
-        
-        self.sequence_length = sequence_length
-        self.batch_size = batch_size
-        self.teacher_forcing_ratio=teacher_forcing_ratio
-         
-        self.embedding = nn.Embedding(num_embeddings, embedding_size)
-        self.rnn = LSTMnetwork(embedding_size+hidden_size, hidden_size, 1, num_layers, dropout, batch_size, device)
-        self.linear = nn.Linear(2*hidden_size+embedding_size, num_embeddings) # reduce to number of clasees for argmax
-    
-    def forward(self, y0, hidden_enc, targets):
-        """
-        y0: (tensor shape: (Batch)) SOS token 
-        z: (tensor, shape: (1, B, H) ): latent
-        hidden_enc (tupple of tensors shapes: (1, B, H)) : 
-        targets (tensor shape: (Batch, Time)): bassline sequence for teacher forcing. 
-        """
-                        
-        y = y0 # first input should be the SOS token, shape: (Batch)
-        hidden = hidden_enc # first decoder hidden state is the last hidden state of the encoder
-
-        z = hidden_enc[0].squeeze(dim=0) # latent is the last hidden state of the encoder
-
-        outputs = []
-        if targets is None:
-            
-            for _ in range(1, self.sequence_length): # for each time step (seq_len-1)
-
-                y_embed = self.embedding(y) # (B, E)
-
-                # the latent is concat at each step
-                y = torch.cat((z, y_embed), dim=1).unsqueeze(dim=1) # shape: (B, T=1, H+E)   
-
-                rnn_out, hidden = self.rnn(y, hidden) # shape: (B, T=1, H+E)
-
-                rnn_out = torch.cat((z, y_embed, rnn_out.squeeze(dim=1)), dim=1) # (B, H+E+H)
-                y = self.linear(rnn_out) # (B, Out)     
-                outputs.append(y) # record the output tensor for loss calculation  
-                
-                y = y.argmax(-1) # most probable token for next step 
-        else:
-
-            y = targets[:,0] # shape: (Batch)
-            for i in range(1, self.sequence_length): # for each time step           
-
-                y_embed = self.embedding(y) # (B, E)
-
-                # the latent is concat at each step
-                y = torch.cat((z, y_embed), dim=1).unsqueeze(dim=1) # shape: (B, T=1, H+E)   
-
-                rnn_out, hidden = self.rnn(y, hidden) # shape: (B, T=1, H+E)
-
-                rnn_out = torch.cat((z, y_embed, rnn_out.squeeze(dim=1)), dim=1) # (B, H+E+H)
-                y = self.linear(rnn_out) # (B, Out)     
-                outputs.append(y) # record the output tensor for loss calculation  
-                
-                y = y.argmax(-1) # most probable token for next step 
-
-                if self.teacher_forcing_ratio > torch.rand(1):                                 
-                    y = targets[:,i] # (Batch)
-        
-        return torch.stack(outputs, dim=2) # (B, K, T)
-                        
-    def init_hidden_cell_states(self, random=False):
-        return self.rnn.init_hidden_cell_states(random)
-    
-    def update_teacher_forcing_ratio(self, step_size):
-        self.teacher_forcing_ratio -= step_size
-
-        
-class StackedUnidirLSTMDecoderwithEmbedding(nn.Module):
-    
-    def __init__(self,
-                num_embeddings, # K by definition (for sampling procedure)
-                embedding_size, # input to the LSTMnetwork
-                hidden_size, # hidden size of the LSTMnetwork
-                num_layers,
-                dropout,
-                batch_size,
-                sequence_length,
-                device):
-        
-        super().__init__()
-
-        self.num_embeddings = num_embeddings
-        self.sequence_length = sequence_length
         self.hidden_size = hidden_size
-        self.batch_size = batch_size
-       
-        # Embed the inputs
-        self.embedding = nn.Embedding(num_embeddings, embedding_size)
-
-        # decoder outputs are fed as inputs
-        self.rnn = LSTMnetwork(embedding_size, hidden_size, 1, num_layers, dropout, batch_size, device)
-
-        self.dense = nn.Linear(hidden_size, num_embeddings)
-                
-    def forward(self, x, hidden):
-        """
-        input is the last output of the encoder network. (batch, feat)
-        """
+        self.n_layers = n_layers
         
-        # (Batch, 1, Feat)
-        y = x.unsqueeze(dim=1)
+        self.embedding = nn.Embedding(output_size, embedding_size)        
+        self.rnn = nn.GRU(embedding_size, hidden_size, n_layers, batch_first=True)        
+        self.fc_out = nn.Linear(hidden_size, output_size)
+
+        self.init_weights()        
         
+    def forward(self, target, hidden, teacher_forcing_ratio):
+        """
+        Parameters:
+        -----------
+            target: (B, T+1)
+            hidden: (L, B, H) 
+
+        Returns:
+        --------
+            outputs: (B, K, T)
+        """
+
+        input = target[:,0] # (B)
+
         outputs = []
-        for _ in range(self.sequence_length): # for each time step
+        for t in range(1, target.shape[1]):
 
-            class_idx = y.argmax(-1)
-            x = self.embedding(class_idx)
-            
-            y, hidden = self.rnn(x, hidden)   
+            input = input.unsqueeze(1) # (B,1)
 
-            y = self.dense(y)
+            # embedded shape: (B, 1, E)       
+            embedded = self.embedding(input)
 
-            outputs.append(y) # record the output            
-               
-        return torch.cat(outputs, dim=1)
+            # output shape: (B, 1, H)
+            output, hidden = self.rnn(embedded, hidden)
+        
+            # output shape: (B, Out)
+            output = self.fc_out(output.squeeze(1))
+
+            outputs.append(output)
+
+            pred = output.argmax(1)
+
+            if random.random() < teacher_forcing_ratio:
+                input = target[:,t] # use actual next token as next input
+            else:
+                input = pred
+
+        outputs = torch.stack(outputs, dim=2) # (B, K, T)
+        return outputs
+    
+    def init_weights(self):
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
+    def init_hidden(self, batch_size):
+        shape = (self.n_layers, batch_size, self.hidden_size)
+        return torch.randn(shape).cuda()

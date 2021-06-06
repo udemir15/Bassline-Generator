@@ -47,20 +47,19 @@ class Seq2SeqGRUWithAttention(nn.Module):
         self.device = device
        
     def forward(self, source, target, teacher_forcing_ratio):
-        """source, target shapes: (B, T+1) """      
+        """
+        source, target shapes: (B, T+1)
+        outputs: (B, E, T)
+        """      
 
         #last hidden state of the encoder is used as the initial hidden state of the decoder
-        #encoder_outputs, hidden = self.encoder(source)
         _, hidden = self.encoder(source)
 
-        #outputs, _ = self.decoder(target, hidden, encoder_outputs, teacher_forcing_ratio) # context is the hidden state
         outputs, _ = self.decoder(target, hidden, teacher_forcing_ratio) # context is the hidden state
-
-        print()
 
         return outputs
 
-    # TODO ONLY DECODER
+    # TODO ONLY DECODER, INIT HIDDEN ??
     def sample(self, note=14, N=10, T=64):
 
         with torch.no_grad():
@@ -80,14 +79,13 @@ class Seq2SeqGRUWithAttention(nn.Module):
         
         with torch.no_grad():
             
-            encoder_outputs, hidden = self.encoder(bassline)
+            _, hidden = self.encoder(bassline)
             
-            #outputs, attention = self.decoder(bassline, hidden, encoder_outputs, 0) # context is the hidden state
-            outputs, attention = self.decoder(bassline, hidden, 0) # context is the hidden state
+            outputs, attentions = self.decoder(bassline, hidden, 0) # context is the hidden state
             
             reconstruction = outputs.argmax(1)
             
-        return reconstruction, attention[:,:,:-1]
+        return reconstruction, attentions[:,:,:-1]
 
 
 class Seq2SeqLSTMSimple(nn.Module):

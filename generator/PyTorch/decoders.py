@@ -89,39 +89,33 @@ class GRUDecoderWithAttention(nn.Module):
         super().__init__()
 
         self.output_size = output_size
-
-        #self.attention = Attention(encoder_hidden_size, hidden_size)    
+   
         self.attention = Attention(output_size, hidden_size)    
         
         self.embedding = nn.Embedding(output_size, embedding_size)        
-        
-        #self.rnn = nn.GRU(embedding_size+2*encoder_hidden_size, hidden_size, 1, batch_first=True)        
+             
         self.rnn = nn.GRU(embedding_size+output_size, hidden_size, 1, batch_first=True)  
         
-        #self.fc_out = nn.Linear(embedding_size+2*encoder_hidden_size+hidden_size, output_size)
         self.fc_out = nn.Linear(embedding_size+output_size+hidden_size, output_size)
 
         self.init_weights()        
         
     def forward(self, target, hidden, teacher_forcing_ratio):
-    #def forward(self, target, hidden, encoder_outputs, teacher_forcing_ratio):
         """
         Parameters:
         -----------
             target: (B, T+1)
             hidden: previous decoder hidden (B, H_dec)
-            encoder_outputs: (B, T+1, 2*H_enc) 
 
         Returns:
         --------
             outputs: (B, E, T)
+            attentions: (B, T*(T+1)/2)
         """
 
         input = target[:,0] # (B)
-
-        #outputs, attentions = [], [] hidden.unsqueeze(2)
         
-        outputs, attentions = [torch.zeros((target.shape[0], self.output_size,1)).cuda()], [] 
+        outputs, attentions = [torch.zeros((target.shape[0], 1, self.output_size)).cuda()], [] 
         for t in range(1, target.shape[1]):
 
             input = input.unsqueeze(1) # (B, 1)
@@ -129,56 +123,35 @@ class GRUDecoderWithAttention(nn.Module):
             embedded = self.embedding(input) # (B, 1, E)
 
             # Look at the decoder output history
-            #output_history = torch.stack(outputs, dim=2) # (B, E, T)
-            output_history = torch.cat(outputs, dim=2)
+            output_history = torch.cat(outputs, dim=1) # (B, T, O)
 
-            #print('out hs {}'.format(output_history.shape))
-
-            a = self.attention(hidden, output_history).unsqueeze(1) # (B, 1, T)
-            #a = self.attention(hidden, encoder_outputs).unsqueeze(1) # (B, 1, T+1)
+            # w: (B, 1, O), a: (B, T) 
+            w, a = self.attention(hidden, output_history)
 
             attentions.append(a)
 
-            #print(a.shape, output_history.shape)
-
-            #w =  torch.bmm(a, encoder_outputs) # (B, 1, 2*H_enc)
-            w =  torch.bmm(a, output_history.permute(0,2,1)) # (B, O,  1)
-
-            #print(embedded.shape, w.shape)
-
-            rnn_input = torch.cat((embedded, w), dim=2) # (B, 1, birşey)
+            rnn_input = torch.cat((embedded, w), dim=2) # (B, 1, E+O)
 
             output, hidden = self.rnn(rnn_input, hidden.unsqueeze(0))
-            # output: (B, 1, H_dec)
-            # hidden: (1, B, H_dec)
+            # output: (B, 1, H_dec), hidden: (1, B, H_dec)
 
             assert (output.permute(1,0,2) == hidden).all()
 
             hidden = hidden.squeeze(0) # (B, H_dec)
 
-            #print(output.shape, w.shape, embedded.shape)
-
             output = self.fc_out(torch.cat((output, w, embedded), dim=2).squeeze(1)) # (B, E)
-
-            #print('output {}'.format(output.shape))
 
             pred = output.argmax(1) # pred shape: (B)
 
-            #print('pred {}'.format(pred.shape))
-
-            outputs.append(output.unsqueeze(2))
+            outputs.append(output.unsqueeze(1))
 
             if random.random() < teacher_forcing_ratio:
                 input = target[:,t] # use actual next token as next input
             else:
                 input = pred
 
-        #outputs = torch.stack(outputs, dim=2) # (B, E, T)
-        outputs = torch.stack(outputs[1:], dim=2).squeeze(3) # (B, E, T)
-
-        #print(outputs.shape)
-
-        attentions = torch.cat(attentions, dim=2) # (B, T, T+1)
+        outputs = torch.cat(outputs[1:], dim=1).permute(0, 2, 1) # (B, E, T) for loss
+        attentions = torch.cat(attentions, dim=1) # (B, T*(T+1)/2)
 
         return outputs, attentions
     
@@ -195,39 +168,38 @@ class GRUDecoderWithAttention(nn.Module):
 
 
 class Attention(nn.Module):
-    #def __init__(self, enc_hid_dim, dec_hid_dim):
-    def __init__(self, output_dim, dec_hid_dim):
+    def __init__(self, output_dim, dec_O):
         super().__init__()
         
-        self.attn = nn.Linear((dec_hid_dim+output_dim), dec_hid_dim)
+        self.attn = nn.Linear((dec_O+output_dim), dec_O)
 
-        self.v = nn.Linear(dec_hid_dim, 1, bias=False)
+        self.v = nn.Linear(dec_O, 1, bias=False)
         
-    #def forward(self, hidden, encoder_outputs):
+
     def forward(self, hidden, output_history):
         """
         hidden = (B, dec_H) prev dec hidden state
-        encoder_outputs = (B, T+1, enc_H*2)"""
-        
-        
-        #encoder_outputs = encoder_outputs.permute(0,2,1)# B T E 
-        output_history = output_history.permute(0,2,1)# B T E 
+        output_history = (B, T, dec_O)
 
+        w: (B, 1, dec_O)
+        attention: (B, T)
+        """
+              
         src_len = output_history.shape[1]
 
-        hidden = hidden.unsqueeze(1).repeat(1, src_len, 1) # (B, T+1, dec_H) 
+        hidden = hidden.unsqueeze(1).repeat(1, src_len, 1) # (B, T, dec_H) 
 
-        catted = torch.cat((hidden, output_history), dim = 2)
-        attt = self.attn(catted) 
+        attt = self.attn(torch.cat((hidden, output_history), dim = 2)) # (B, T, dec_H) 
         
-        # cat shape: (B, T+1, dec_H + 2*enc_H)
-        #attt = self.attn(torch.cat((hidden, encoder_outputs), dim = 2)) # (B, T+1, dec_H)
-        
-        energy = torch.tanh(attt) # (B, T+1, dec_H)
+        energy = torch.tanh(attt) # (B, T, dec_H)
 
-        attention = self.v(energy).squeeze(2) # (B, T+1)
+        attention = self.v(energy).squeeze(2) # (B, T)
+
+        attention = F.softmax(attention, dim=1).unsqueeze(1)  # (B,1,T)
+
+        w =  torch.bmm(attention, output_history) # (B, 1, dec_O)
         
-        return F.softmax(attention, dim=1) # (B, T+1)
+        return w, attention.squeeze(1)
 
 
 class SimpleLSTMDecoder(nn.Module):

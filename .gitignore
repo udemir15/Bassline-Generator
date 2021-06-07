@@ -4,12 +4,14 @@ plots/*
 jupyter_submit.sh
 .ipynb_checkpoints
 *.log
-*/Models/*
+*/keras_weights/*
 */Datasets/*
 */figures/*
 */wandb/*
 */__pycache__/*
 */generations/*
+*/midis/*
+*.mid
 .vscode/*
 *.pt
 __pycache__/

@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from utils import now
 from numpy.random import normal
 from pandas import DataFrame
 import tensorflow as tf
@@ -76,9 +76,8 @@ class VAE(models.Model):
 
     def save_samples(self, num_samples=10):
         samples = DataFrame(self.sample(num_samples))
-        now = '_'.join(str(datetime.now()).split('.')[0].split(' '))
         samples.to_csv(
-            f'generations/{len(samples)}_{self.name}_samples_{now}.csv', index=False)
+            f'generations/{len(samples)}_{self.name}_samples_{now()}.csv', index=False)
 
 
 class DenseVAE(VAE):
@@ -93,13 +92,13 @@ class DenseVAE(VAE):
 
 
 class RNNVAE(VAE):
-    def __init__(self, encoder_hidden_units, latent_dim, decoder_hidden_units, timesteps, vocab_size, building_encoder_rnn="LSTM",
+    def __init__(self, encoder_hidden_units, last_dense_dim, latent_dim, decoder_hidden_units, timesteps, vocab_size, building_encoder_rnn="LSTM",
                  building_decoder_rnn="LSTM", embed_size=32, bidirectional_encoder=False, dropout=0,
                  name="RNNVAE", **kwargs):
         super(RNNVAE, self).__init__(name=name, **kwargs)
         self.latent_dim = latent_dim
         self.timesteps = timesteps
-        self.encoder = RNNEncoder(encoder_hidden_units, latent_dim, vocab_size, embed_size, bidirectional_encoder, dropout, getattr(
+        self.encoder = RNNEncoder(encoder_hidden_units, last_dense_dim, latent_dim, vocab_size, embed_size, bidirectional_encoder, dropout, getattr(
             layers, building_encoder_rnn), name=f"{'Bi' if bidirectional_encoder else ''}{building_encoder_rnn}_Encoder")
         self.decoder = RNNDecoder(decoder_hidden_units, vocab_size, timesteps, dropout, getattr(
             layers, building_decoder_rnn), name=f"{building_decoder_rnn}_Decoder")
@@ -115,3 +114,15 @@ class CNNVAE(VAE):
             encoder_filter_sizes, encoder_dilation_rates, vocab_size, latent_dim, embed_size)
         self.decoder = CNNDecoder(
             decoder_filter_sizes, decoder_dense_unit, vocab_size, decoder_dilation_rates, timesteps=timesteps)
+
+
+class CNNEncoderDenseDecoder(VAE):
+    def __init__(self, encoder_filter_sizes, latent_dim, decoder_intermediate_dims, timesteps,
+                 vocab_size, encoder_dilation_rates=1, embed_size=16, name="CNNEncoderDenseDecoder", **kwargs):
+        super(CNNEncoderDenseDecoder, self).__init__(name=name, **kwargs)
+        self.latent_dim = latent_dim
+        self.timesteps = timesteps
+        self.encoder = CNNEncoder(
+            encoder_filter_sizes, encoder_dilation_rates, vocab_size, latent_dim, embed_size)
+        self.decoder = DenseDecoder(
+            decoder_intermediate_dims, timesteps, vocab_size)

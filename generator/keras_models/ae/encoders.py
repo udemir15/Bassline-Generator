@@ -1,5 +1,5 @@
 from tensorflow.keras import layers
-from models.layers import ConvMaxPooling1D
+from keras_models.layers import ConvMaxPooling1D
 
 
 class RNNEncoder(layers.Layer):

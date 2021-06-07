@@ -1,6 +1,6 @@
 from tensorflow.keras import layers
-from models.vae.utils import Sampling
-from models.layers import ConvMaxPooling1D
+from keras_models.vae.utils import Sampling
+from keras_models.layers import ConvMaxPooling1D
 
 
 class DenseEncoder(layers.Layer):
@@ -30,7 +30,7 @@ class DenseEncoder(layers.Layer):
 
 class RNNEncoder(layers.Layer):
 
-    def __init__(self, hidden_units, latent_dim, vocab_size, embed_size=32, bidirectional=False, dropout=0,
+    def __init__(self, hidden_units, last_dense_dim, latent_dim, vocab_size, embed_size=32, bidirectional=False, dropout=0,
                  building_rnn=layers.LSTM, name="RNN_Encoder", **kwargs):
         super(RNNEncoder, self).__init__(name=name, **kwargs)
         assert type(hidden_units) == int or type(
@@ -43,6 +43,7 @@ class RNNEncoder(layers.Layer):
         if bidirectional:
             self.rnn_layers = [layers.Bidirectional(
                 rnn_layer) for rnn_layer in self.rnn_layers]
+        self.last_dense_layer = layers.Dense(last_dense_dim, activation='relu')
         self.z_mean_layer = layers.Dense(latent_dim)
         self.z_log_sigma_layer = layers.Dense(latent_dim)
         self.sampling = Sampling()
@@ -51,6 +52,7 @@ class RNNEncoder(layers.Layer):
         x = self.embedding(inputs)
         for rnn_layer in self.rnn_layers:
             x = rnn_layer(x)
+        x = self.last_dense_layer(x)
         z_mean = self.z_mean_layer(x)
         z_log_sigma = self.z_log_sigma_layer(x)
         z = self.sampling((z_mean, z_log_sigma))

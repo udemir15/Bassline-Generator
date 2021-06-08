@@ -30,29 +30,38 @@ def append_SOS(X, SOS_token=-1):
     X = np.concatenate( (SOS_token*np.ones((X.shape[0],1), dtype=np.int64), X), axis=1)    
     return X+1 
     
-
 class DataSet(Dataset):
     
     def __init__(self, X):
         self.X = X
         
     def __getitem__(self, idx):
-        return self.X[idx], self.X[idx]
+        return self.X[idx]
     
     def __len__(self):
         return len(self.X)
     
-def make_loaders(X, data_params, train_ratio=0.75, validation_ratio=0.15, test_ratio=0.1):
+def make_loaders_test(X, batch_size, train_ratio=0.75, validation_ratio=0.15, test_ratio=0.1):
     
     x_train, x_test = train_test_split(X, test_size=1 - train_ratio, random_state=42, shuffle=True)
     x_val, x_test  = train_test_split(x_test, test_size=test_ratio/(test_ratio + validation_ratio), random_state=42, shuffle=False)
 
     train_set, validation_set, test_set = DataSet(x_train), DataSet(x_val), DataSet(x_test)
 
-    train_loader = DataLoader(train_set, batch_size=data_params['batch_size'], shuffle=True, drop_last=True)
-    validation_loader = DataLoader(validation_set, batch_size=data_params['batch_size'], shuffle=True) # , drop_last=True   
-    test_loader = DataLoader(test_set, batch_size=data_params['batch_size']) #, drop_last=True
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=True)
+    validation_loader = DataLoader(validation_set, batch_size=batch_size, shuffle=True) # , drop_last=True   
+    test_loader = DataLoader(test_set, batch_size=batch_size) #, drop_last=True
     
     return train_loader, validation_loader, test_loader 
     
 
+def make_loaders(X, batch_size, train_ratio=0.75):
+    
+    x_train, x_test = train_test_split(X, test_size=1 - train_ratio, random_state=42, shuffle=True)
+
+    train_set, test_set = DataSet(x_train), DataSet(x_test)
+
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=True)
+    test_loader = DataLoader(test_set, batch_size=batch_size) #, drop_last=True
+    
+    return train_loader, test_loader 

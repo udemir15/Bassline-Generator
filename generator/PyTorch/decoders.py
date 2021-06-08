@@ -98,8 +98,10 @@ class GRUDecoderWithAttention(nn.Module):
         
         self.fc_out = nn.Linear(embedding_size+output_size+hidden_size, output_size)
 
-        self.init_weights()        
-        
+        self.init_weights()
+
+        self.n_layers = 1
+        self.hidden_size =  hidden_size
         
     def forward(self, target, hidden, teacher_forcing_ratio):
         """

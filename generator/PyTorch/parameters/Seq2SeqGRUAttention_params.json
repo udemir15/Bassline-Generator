@@ -1,0 +1,19 @@
+{
+    "data": {
+        "dataset_path": "/scratch/users/udemir15/ELEC491/bassline_transcription/data/datasets/[28, 51]",
+        "dataset_name": "TechHouse_bassline_representations_4020",
+        "scale_type": "min",
+        "M": 8
+    },
+    "encoder": {
+        "embedding_size": 12,
+        "hidden_size": 128,
+        "output_size": 64
+    },
+    "training": {
+        "batch_size": 128,
+        "N_epochs": 200,
+        "lr": 0.001,
+        "teacher_forcing_ratio": 0.5
+    }
+}

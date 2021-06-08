@@ -1,4 +1,0 @@
-        # Print interim results
-        if b%600 == 0:
-            print(f'epoch: {i:2}  batch: {b:4} [{10*b:6}/60000]  loss: {loss.item():10.8f}  \
-accuracy: {trn_corr.item()*100/(10*b):7.3f}%')

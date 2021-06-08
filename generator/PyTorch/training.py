@@ -16,7 +16,7 @@ import wandb
 wandb.login()
 
 
-def main_wandb(model, criterion, optimizer, device, train_loader, validation_loader, test_loader, params, project):
+def main_wandb(model, criterion, optimizer, device, train_loader, validation_loader, params, project):
 
     N_epochs = params['training']['N_epochs']
     tf_ratio = params['training']['teacher_forcing_ratio']
@@ -28,13 +28,11 @@ def main_wandb(model, criterion, optimizer, device, train_loader, validation_loa
     with wandb.init(project=project, name=model_name, config=params, entity='nbg'):
         
         wandb.watch(model, log='all')
-        
-        test_loss, test_acc, _ = test(model, test_loader, criterion, device)    
+          
         samples = model.sample()
-        print('\nBefore Training:')
-        print('Test Loss: {:.4f}, Test Accuracy: {:.4f}'.format(test_loss, test_acc))    
+        print('\nBefore Training:')    
         print('\nSample:\n{}\n'.format(samples[0]))    
-        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'samples': samples})
+        wandb.log({'samples': samples})
 
         for epoch in tqdm(range(N_epochs)):
 
@@ -65,15 +63,13 @@ def main_wandb(model, criterion, optimizer, device, train_loader, validation_loa
                 print('Sample:\n{}'.format(samples[0]))
                 wandb.log({'samples': samples})
                 
-        test_loss, test_acc, _ = test(model, test_loader, criterion, device)
         samples = model.sample()
-        print('\nAfter Training:')
-        print('Test Loss: {:.4f}, Test Accuracy: {:.4f} {}'.format(test_loss, test_acc))    
+        print('\nAfter Training:') 
         print('\nSample:\n{}\n'.format(samples[0]))    
-        wandb.log({'test_loss': test_loss, 'test_accuracy': test_acc, 'samples': samples})    
+        wandb.log({'samples': samples})    
 
 
-def main_simple(model, criterion, optimizer, device, train_loader, validation_loader, test_loader, params):
+def main_simple(model, criterion, optimizer, device, train_loader, validation_loader, params):
 
     N_epochs = params['training']['N_epochs']
     tf_ratio = params['training']['teacher_forcing_ratio']
@@ -81,10 +77,8 @@ def main_simple(model, criterion, optimizer, device, train_loader, validation_lo
     #test_losses, test_accuracies, test_distances = [], [], []
     #train_losses, train_accuracies, train_distances = [], [], []
 
-    test_loss, test_acc, _ = test(model, test_loader, criterion, device)
     samples = model.sample()
     print('\nBefore Training:')
-    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}'.format(test_loss, test_acc)) 
     print('Initial Sample:\n{}\n'.format(samples[0]))    
 
     for epoch in range(N_epochs):
@@ -98,10 +92,8 @@ def main_simple(model, criterion, optimizer, device, train_loader, validation_lo
         print('Epoch: {}, train_loss: {:.6f}, train_acc: {:.3f}, val_loss: {:.6f}, val_acc: {:.3f}'\
             .format(epoch, train_loss,train_acc, np.mean(val_loss), np.mean(val_acc)))
         
-    test_loss, test_acc,  _ = test(model, test_loader, criterion, device)
     samples = model.sample()
     print('\nAfter Training:')
-    print('Test Loss: {:.4f}, Test Accuracy: {:.4f}'.format(test_loss, test_acc))    
     print('\nSample:\n{}\n'.format(samples[0]))    
 
 
@@ -111,11 +103,12 @@ def train(model, loader, optimizer, criterion, device, tf_ratio):
     model.train()
 
     losses, accuracies  = [], []
-    for source, target in loader:
+    for source in loader:
         
-        # source, target shapes: (B, T+1)
-        source, target = source.to(device), target.to(device)
-                
+        # source : (B, T+1)
+        source = source.to(device)
+        target = source.clone()
+
         optimizer.zero_grad()
 
         # activations shape: (B, K, T)
@@ -145,11 +138,12 @@ def test(model, loader, criterion, device):
     model.eval()
     
     losses, accuracies,  = [], []
-    for source, target in loader:
+    for source in loader:
         with torch.no_grad():
             
             # source, target shapes: (B, T+1)
-            source, target = source.to(device), target.to(device)
+            source = source.to(device)
+            target = source.clone()
 
             # activations shape: (B, K, T)
             activations = model(source, target, 0.0) # turn off the teacher forcing ratio

@@ -88,39 +88,6 @@ class Seq2SeqGRUWithAttention(nn.Module):
         return reconstruction, attentions[:,:,:-1]
 
 
-class Seq2SeqLSTMSimple(nn.Module):
-    def __init__(self, encoder, decoder, device):
-        super().__init__()
-        
-        self.encoder = encoder
-        self.decoder = decoder
-        self.device = device
-       
-    def forward(self, source, target, teacher_forcing_ratio):
-        """source, target shapes: (B, T+1) """      
-
-        #last hidden state of the encoder is used as the initial hidden state of the decoder
-        hidden, cell = self.encoder(torch.fliplr(source))
-
-        outputs = self.decoder(target, hidden, cell, teacher_forcing_ratio)
-        
-        return outputs
-
-    def sample(self, N=10, T=65):
-
-        with torch.no_grad():
-            # Initial hidden, cell states
-            hidden, cell = self.decoder.init_hidden_cell(N)
-
-            # zero input, <SOS> token, shape (N, T) to accomodate the decoder unrolling
-            input = torch.zeros((N,T), dtype=torch.int64, device=self.device)
-
-            output = self.decoder(input, hidden, cell, 0.0)
-            predictions = output.argmax(1)
-        
-        return predictions
-
-
 class Seq2SeqGRUSimple(nn.Module):
     def __init__(self, encoder, decoder, device):
         super().__init__()
@@ -152,6 +119,40 @@ class Seq2SeqGRUSimple(nn.Module):
             input = torch.zeros((N,T), dtype=torch.int64, device=self.device)
 
             output = self.decoder(input, hidden, 0.0)
+            
+            predictions = output.argmax(1)
+        
+        return predictions
+
+
+class Seq2SeqLSTMSimple(nn.Module):
+    def __init__(self, encoder, decoder, device):
+        super().__init__()
+        
+        self.encoder = encoder
+        self.decoder = decoder
+        self.device = device
+       
+    def forward(self, source, target, teacher_forcing_ratio):
+        """source, target shapes: (B, T+1) """      
+
+        #last hidden state of the encoder is used as the initial hidden state of the decoder
+        hidden, cell = self.encoder(torch.fliplr(source))
+
+        outputs = self.decoder(target, hidden, cell, teacher_forcing_ratio)
+        
+        return outputs
+
+    def sample(self, N=10, T=65):
+
+        with torch.no_grad():
+            # Initial hidden, cell states
+            hidden, cell = self.decoder.init_hidden_cell(N)
+
+            # zero input, <SOS> token, shape (N, T) to accomodate the decoder unrolling
+            input = torch.zeros((N,T), dtype=torch.int64, device=self.device)
+
+            output = self.decoder(input, hidden, cell, 0.0)
             predictions = output.argmax(1)
         
         return predictions

@@ -2,36 +2,6 @@ import torch
 import torch.nn as nn
 
 
-class LSTMEncoder(nn.Module):
-    def __init__(self, input_size, embedding_size, hidden_size, n_layers):
-        
-        super().__init__()
-        
-        self.embedding = nn.Embedding(input_size, embedding_size)
-        self.rnn = nn.LSTM(embedding_size, hidden_size, n_layers, batch_first=True)
-        
-        self.init_weights()
-
-    def forward(self, src):        
-        """src: shape (B, T+1)"""
-        
-        # embedded: shape (T+1, B, E)     
-        embedded = self.embedding(src)
-
-        # hidden, cell shapes: (L * D, B, H)
-        _, (hidden, cell) = self.rnn(embedded)
-        
-        return hidden, cell
-
-    def init_weights(self):
-        #nn.init.kaiming_uniform_(self.embed_out, a=math.sqrt(5))
-        for name, param in self.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name:
-                nn.init.xavier_uniform_(param)
-
-
 class GRUEncoder(nn.Module):
     def __init__(self, input_size, embedding_size, hidden_size, n_layers):
         
@@ -91,6 +61,36 @@ class BidirectionalGRUEncoder(nn.Module):
         hidden = torch.tanh(self.fc(cat_hiddens)) # (B, O)
 
         return outputs, hidden
+
+    def init_weights(self):
+        #nn.init.kaiming_uniform_(self.embed_out, a=math.sqrt(5))
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
+
+class LSTMEncoder(nn.Module):
+    def __init__(self, input_size, embedding_size, hidden_size, n_layers):
+        
+        super().__init__()
+        
+        self.embedding = nn.Embedding(input_size, embedding_size)
+        self.rnn = nn.LSTM(embedding_size, hidden_size, n_layers, batch_first=True)
+        
+        self.init_weights()
+
+    def forward(self, src):        
+        """src: shape (B, T+1)"""
+        
+        # embedded: shape (T+1, B, E)     
+        embedded = self.embedding(src)
+
+        # hidden, cell shapes: (L * D, B, H)
+        _, (hidden, cell) = self.rnn(embedded)
+        
+        return hidden, cell
 
     def init_weights(self):
         #nn.init.kaiming_uniform_(self.embed_out, a=math.sqrt(5))

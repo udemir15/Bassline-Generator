@@ -10,9 +10,9 @@ class GRUDecoder(nn.Module):
         """Since this is an AutoEncoder Seq2Seq hybrid, the input size is the output size."""
 
         super().__init__()
-        
-        self.hidden_size = hidden_size
-        self.n_layers = 1
+
+        self.n_layers=1
+        self.hidden_size=hidden_size
         
         self.embedding = nn.Embedding(output_size, embedding_size)        
         self.rnn = nn.GRU(embedding_size+hidden_size, hidden_size, 1, batch_first=True)        
@@ -47,8 +47,7 @@ class GRUDecoder(nn.Module):
 
             rnn_input = torch.cat((embedded, context), dim=2)
 
-            # output shape: (B, 1, H)
-            # hidden shape: (L*D, B, H)
+            # output shape: (B, 1, H), hidden shape: (L*D, B, H)
             output, hidden = self.rnn(rnn_input, hidden)
 
             # output shape: (B, E+2*H)
@@ -67,7 +66,6 @@ class GRUDecoder(nn.Module):
                 input = pred
 
         outputs = torch.stack(outputs, dim=2) # (B, K, T)
-
         return outputs
     
     def init_weights(self):
@@ -89,19 +87,15 @@ class GRUDecoderWithAttention(nn.Module):
         super().__init__()
 
         self.output_size = output_size
+        self.hidden_size = hidden_size
+        self.n_layers = 1
    
-        self.attention = Attention(output_size, hidden_size)    
-        
+        self.attention = Attention(output_size, hidden_size)           
         self.embedding = nn.Embedding(output_size, embedding_size)        
-             
-        self.rnn = nn.GRU(embedding_size+output_size, hidden_size, 1, batch_first=True)  
-        
+        self.rnn = nn.GRU(embedding_size+output_size, hidden_size, self.n_layers, batch_first=True)
         self.fc_out = nn.Linear(embedding_size+output_size+hidden_size, output_size)
 
         self.init_weights()
-
-        self.n_layers = 1
-        self.hidden_size =  hidden_size
         
     def forward(self, target, hidden, teacher_forcing_ratio):
         """
@@ -205,6 +199,71 @@ class Attention(nn.Module):
         return w, attention.squeeze(1)
 
 
+class SimpleGRUDecoder(nn.Module):
+    def __init__(self, output_size, embedding_size, hidden_size, n_layers):
+        super().__init__()
+
+        self.hidden_size = hidden_size
+        self.n_layers = n_layers
+        
+        self.embedding = nn.Embedding(output_size, embedding_size)        
+        self.rnn = nn.GRU(embedding_size, hidden_size, num_layers=n_layers, batch_first=True)        
+        self.fc_out = nn.Linear(hidden_size, output_size)
+
+        self.init_weights()        
+        
+    def forward(self, target, hidden, teacher_forcing_ratio):
+        """
+        Parameters:
+        -----------
+            target: (B, T+1)
+            hidden: (L, B, H) initial hidden state
+
+        Returns:
+        --------
+            outputs: (B, K, T)
+        """
+
+        input = target[:,0] # (B)
+
+        outputs = []
+        for t in range(1, target.shape[1]):
+
+            input = input.unsqueeze(1) # (B,1)
+
+            # embedded shape: (B, 1, E)       
+            embedded = self.embedding(input)
+
+            # output shape: (B, 1, H)
+            output, hidden = self.rnn(embedded, hidden)
+        
+            # output shape: (B, Out)
+            output = self.fc_out(output.squeeze(1))
+
+            outputs.append(output)
+
+            pred = output.argmax(1)
+
+            if random.random() < teacher_forcing_ratio:
+                input = target[:,t] # use actual next token as next input
+            else:
+                input = pred
+
+        outputs = torch.stack(outputs, dim=2) # (B, K, T)
+        return outputs
+    
+    def init_weights(self):
+        for name, param in self.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.xavier_uniform_(param)
+
+    def init_hidden(self, batch_size):
+        shape = (self.n_layers, batch_size, self.hidden_size)
+        return torch.randn(shape).cuda()
+
+
 class SimpleLSTMDecoder(nn.Module):
     def __init__(self, output_size, embedding_size, hidden_size, n_layers):
         super().__init__()
@@ -268,68 +327,3 @@ class SimpleLSTMDecoder(nn.Module):
     def init_hidden_cell(self, batch_size):
         shape = (self.n_layers, batch_size, self.hidden_size)
         return torch.randn(shape).cuda(), torch.randn(shape).cuda()
-
-
-class SimpleGRUDecoder(nn.Module):
-    def __init__(self, output_size, embedding_size, hidden_size, n_layers):
-        super().__init__()
-        
-        self.hidden_size = hidden_size
-        self.n_layers = n_layers
-        
-        self.embedding = nn.Embedding(output_size, embedding_size)        
-        self.rnn = nn.GRU(embedding_size, hidden_size, n_layers, batch_first=True)        
-        self.fc_out = nn.Linear(hidden_size, output_size)
-
-        self.init_weights()        
-        
-    def forward(self, target, hidden, teacher_forcing_ratio):
-        """
-        Parameters:
-        -----------
-            target: (B, T+1)
-            hidden: (L, B, H) 
-
-        Returns:
-        --------
-            outputs: (B, K, T)
-        """
-
-        input = target[:,0] # (B)
-
-        outputs = []
-        for t in range(1, target.shape[1]):
-
-            input = input.unsqueeze(1) # (B,1)
-
-            # embedded shape: (B, 1, E)       
-            embedded = self.embedding(input)
-
-            # output shape: (B, 1, H)
-            output, hidden = self.rnn(embedded, hidden)
-        
-            # output shape: (B, Out)
-            output = self.fc_out(output.squeeze(1))
-
-            outputs.append(output)
-
-            pred = output.argmax(1)
-
-            if random.random() < teacher_forcing_ratio:
-                input = target[:,t] # use actual next token as next input
-            else:
-                input = pred
-
-        outputs = torch.stack(outputs, dim=2) # (B, K, T)
-        return outputs
-    
-    def init_weights(self):
-        for name, param in self.named_parameters():
-            if 'bias' in name:
-                nn.init.constant_(param, 0.0)
-            elif 'weight' in name:
-                nn.init.xavier_uniform_(param)
-
-    def init_hidden(self, batch_size):
-        shape = (self.n_layers, batch_size, self.hidden_size)
-        return torch.randn(shape).cuda()

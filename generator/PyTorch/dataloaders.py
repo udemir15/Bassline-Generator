@@ -5,7 +5,7 @@ import numpy as np
 from torch.utils.data import Dataset, DataLoader
 from sklearn.model_selection import train_test_split
 
-def load_data(data_params): 
+def load_data(data_params, SOS=False): 
     
     dataset_path, scale_type, M = data_params['dataset_path'], data_params['scale_type'], data_params['M']
     
@@ -19,6 +19,10 @@ def load_data(data_params):
     
     # First column is the title
     X = df[df.columns[1:]].to_numpy()
+
+    if SOS:
+        print('SOS token added.')
+        X = append_SOS(X)
     
     return X, titles
 
@@ -41,6 +45,19 @@ class DataSet(Dataset):
     def __len__(self):
         return len(self.X)
     
+
+def make_loaders(X, batch_size, train_ratio=0.75):
+    
+    x_train, x_test = train_test_split(X, test_size=1-train_ratio, random_state=42, shuffle=True)
+
+    train_set, test_set = DataSet(x_train), DataSet(x_test)
+
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=False)
+    test_loader = DataLoader(test_set, batch_size=batch_size)
+    
+    return train_loader, test_loader 
+
+
 def make_loaders_test(X, batch_size, train_ratio=0.75, validation_ratio=0.15, test_ratio=0.1):
     
     x_train, x_test = train_test_split(X, test_size=1 - train_ratio, random_state=42, shuffle=True)
@@ -53,15 +70,3 @@ def make_loaders_test(X, batch_size, train_ratio=0.75, validation_ratio=0.15, te
     test_loader = DataLoader(test_set, batch_size=batch_size) #, drop_last=True
     
     return train_loader, validation_loader, test_loader 
-    
-
-def make_loaders(X, batch_size, train_ratio=0.75):
-    
-    x_train, x_test = train_test_split(X, test_size=1 - train_ratio, random_state=42, shuffle=True)
-
-    train_set, test_set = DataSet(x_train), DataSet(x_test)
-
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=True)
-    test_loader = DataLoader(test_set, batch_size=batch_size) #, drop_last=True
-    
-    return train_loader, test_loader 

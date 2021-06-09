@@ -1,20 +1,20 @@
 {
     "data": {
         "dataset_path": "/scratch/users/udemir15/ELEC491/bassline_transcription/data/datasets/[28, 51]",
-        "dataset_name": "TechHouse_bassline_representations_4020_augmented",
+        "dataset_name": "TechHouse_bassline_representations_4020",
         "scale_type": "min",
         "M": 8
     },
     "encoder": {
         "embedding_size": 12,
-        "hidden_size": 32,
-        "n_layers": 4
+        "hidden_size": 512,
+        "n_layers": 1
     },
     "training": {
         "batch_size": 128,
-        "N_epochs": 200,
+        "N_epochs": 1000,
         "lr": 0.0005,
         "teacher_forcing_ratio": 0.75
     },
-    "project_name": "seq2seq_gru_simple"
+    "project_name": "seq2seq_gru"
 }

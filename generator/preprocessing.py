@@ -20,7 +20,7 @@ def one_hot_encode(arr, encode_length):
     return np.eye(encode_length)[arr.astype(np.uint)]
 
 
-def replace_continue(arr, cont_token):
+def replace_sustain(arr, cont_token):
     for r in arr:
         for idx, el in enumerate(r[1:]):
             if el == cont_token:

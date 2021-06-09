@@ -34,3 +34,4 @@ echo
 
 python train_Seq2SeqGRUWithAttention.py
 #python train_Seq2SeqGRUSimple.py
+#python train_Seq2SeqGRU.py

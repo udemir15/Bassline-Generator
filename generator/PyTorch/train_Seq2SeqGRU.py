@@ -25,7 +25,7 @@ print(device)
 
 if __name__ == '__main__':
     
-    with open('parameters/Seq2SeqGRUSimple_params.json', 'r') as infile: # load params
+    with open('parameters/Seq2SeqGRU_params.json', 'r') as infile: # load params
         params = json.load(infile)
 
     data_params = params['data']
@@ -43,15 +43,14 @@ if __name__ == '__main__':
     encoder_params['input_size'] = K
     decoder_params = {'output_size': K,
                     'embedding_size': encoder_params['embedding_size'],
-                    'hidden_size': encoder_params['hidden_size'],
-                    'n_layers': encoder_params['n_layers']}
+                    'hidden_size': encoder_params['hidden_size']}
 
     train_loader, test_loader = make_loaders(X, train_params['batch_size'])
 
     encoder = encoders.GRUEncoder(**encoder_params)
-    decoder = decoders.SimpleGRUDecoder(**decoder_params)
+    decoder = decoders.GRUDecoder(**decoder_params)
 
-    model = models.Seq2SeqGRUSimple(encoder, decoder, device).to(device)
+    model = models.Seq2SeqGRU(encoder, decoder, device).to(device)
     print(model)
     print('Number of parameters: {}\n'.format(sum([parameter.numel() for parameter in model.parameters()])))
 

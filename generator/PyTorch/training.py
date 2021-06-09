@@ -43,8 +43,8 @@ def main_wandb(model, criterion, optimizer, device, train_loader, validation_loa
             val_target, val_pred = torch.chunk(val_preds, 2, dim=0) 
             
             # Epoch dependent teacher forcing rate
-            if epoch > int(N_epochs/2) and epoch < 3*int(N_epochs/4):
-                tf_ratio -= 4*tf_ratio/N_epochs
+            if epoch > int(N_epochs/4) and epoch < 3*int(N_epochs/4):
+                tf_ratio -= 2*params['training']['teacher_forcing_ratio']/N_epochs
             
             wandb.log({'train_loss': train_loss, 'train_accuracy': train_acc,
                     'validation_loss': val_loss, 'validation_acc': val_acc,
@@ -74,9 +74,6 @@ def main_simple(model, criterion, optimizer, device, train_loader, validation_lo
     N_epochs = params['training']['N_epochs']
     tf_ratio = params['training']['teacher_forcing_ratio']
 
-    #test_losses, test_accuracies, test_distances = [], [], []
-    #train_losses, train_accuracies, train_distances = [], [], []
-
     samples = model.sample()
     print('\nBefore Training:')
     print('Initial Sample:\n{}\n'.format(samples[0]))    
@@ -84,10 +81,12 @@ def main_simple(model, criterion, optimizer, device, train_loader, validation_lo
     for epoch in range(N_epochs):
         
         train_loss, train_acc = train(model, train_loader, optimizer, criterion, device, tf_ratio)
-        val_loss, val_acc, val_preds = test(model, validation_loader, criterion, device)
+        val_loss, val_acc, _ = test(model, validation_loader, criterion, device)
         
-        if epoch > N_epochs//2 and epoch < 3*(N_epochs):
-            tf_ratio -= 4*tf_ratio/N_epochs
+        if epoch > int(N_epochs/4) and epoch <= 3*int(N_epochs/4):
+            tf_ratio -= 2*params['training']['teacher_forcing_ratio']/N_epochs
+            if epoch == 3*int(N_epochs/4):
+                tf_ratio = 0.0
 
         print('Epoch: {}, train_loss: {:.6f}, train_acc: {:.3f}, val_loss: {:.6f}, val_acc: {:.3f}'\
             .format(epoch, train_loss,train_acc, np.mean(val_loss), np.mean(val_acc)))
@@ -115,7 +114,7 @@ def train(model, loader, optimizer, criterion, device, tf_ratio):
         activations = model(source, target, tf_ratio) 
 
         # SOS token is removed for loss and metric calculations
-        target = target[:, 1:] 
+        target = target[:, 1:] # (B, T)
         
         loss = criterion(activations, target) 
         loss.backward()
@@ -124,7 +123,7 @@ def train(model, loader, optimizer, criterion, device, tf_ratio):
         loss.detach()
         losses.append(loss.item())
         
-        y_pred = activations.argmax(1)
+        y_pred = activations.argmax(1) # (B, T)
 
         # Metrics
         target, y_pred = target.cpu().numpy(), y_pred.cpu().numpy() 
@@ -149,7 +148,7 @@ def test(model, loader, criterion, device):
             activations = model(source, target, 0.0) # turn off the teacher forcing ratio
 
             # SOS token is removed for loss and metric calculations
-            target = target[:, 1:]  
+            target = target[:, 1:]  # (B, T)
 
             loss = criterion(activations, target) 
             losses.append(loss.item())  
@@ -191,7 +190,6 @@ def track_gradients(model, grad_dict):
             grad_dict[n]['ave'].append(grad.mean())
             grad_dict[n]['max'].append(grad.max())
             grad_dict[n]['min'].append(grad.min())
-
 
 def print_gradients(grad_dict):
     print('\n')
